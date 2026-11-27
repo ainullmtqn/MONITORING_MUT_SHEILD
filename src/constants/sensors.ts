@@ -1,6 +1,43 @@
-import { SensorKey, SensorMeta, SensorStatus, ThresholdMap } from '../types/sensor';
+import {
+  SensorKey,
+  SensorMeta,
+  SensorNodeConfig,
+  SensorStatus,
+  ThresholdMap,
+} from '../types/sensor';
 
 export const SENSOR_ORDER: SensorKey[] = ['mq4', 'mq135', 'temperature', 'humidity'];
+
+export const SENSOR_NODES: SensorNodeConfig[] = [
+  {
+    id: 'titik-1',
+    code: 'NODE-01',
+    shortName: 'Titik 1',
+    name: 'Titik 1 - Pipa Utama',
+    baseline: { mq4: 260, mq135: 175, temperature: 26.4, humidity: 56.0 },
+  },
+  {
+    id: 'titik-2',
+    code: 'NODE-02',
+    shortName: 'Titik 2',
+    name: 'Titik 2 - Ruang Kompresor',
+    baseline: { mq4: 315, mq135: 205, temperature: 28.2, humidity: 54.5 },
+  },
+  {
+    id: 'titik-3',
+    code: 'NODE-03',
+    shortName: 'Titik 3',
+    name: 'Titik 3 - Gudang Gas',
+    baseline: { mq4: 285, mq135: 190, temperature: 25.8, humidity: 60.5 },
+  },
+  {
+    id: 'titik-4',
+    code: 'NODE-04',
+    shortName: 'Titik 4',
+    name: 'Titik 4 - Ruang Panel',
+    baseline: { mq4: 195, mq135: 160, temperature: 27.1, humidity: 52.0 },
+  },
+];
 
 export const SENSOR_METADATA: Record<SensorKey, SensorMeta> = {
   mq4: {
@@ -77,8 +114,14 @@ export const DEFAULT_THRESHOLDS: ThresholdMap = {
 };
 
 export const MAX_HISTORY_POINTS = 20;
-export const MAX_ALERT_LOGS = 60;
+export const MAX_ALERT_LOGS = 80;
 export const POLL_INTERVAL_MS = 2000;
+
+export const STATUS_PRIORITY: Record<SensorStatus, number> = {
+  normal: 1,
+  warning: 2,
+  danger: 3,
+};
 
 export function evaluateSensorStatus(
   value: number,
@@ -86,6 +129,12 @@ export function evaluateSensorStatus(
 ): SensorStatus {
   if (value >= threshold.danger) return 'danger';
   if (value >= threshold.warning) return 'warning';
+  return 'normal';
+}
+
+export function getHighestStatus(statuses: SensorStatus[]): SensorStatus {
+  if (statuses.includes('danger')) return 'danger';
+  if (statuses.includes('warning')) return 'warning';
   return 'normal';
 }
 

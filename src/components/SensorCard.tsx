@@ -8,6 +8,7 @@ interface SensorCardProps {
   value: number;
   threshold: SensorThreshold;
   status: SensorStatus;
+  sourceLabel?: string;
 }
 
 const GAS_ICONS = {
@@ -15,13 +16,19 @@ const GAS_ICONS = {
   mq135: Wind,
 } as const;
 
-export function SensorCard({ meta, value, threshold, status }: SensorCardProps) {
+export function SensorCard({
+  meta,
+  value,
+  threshold,
+  status,
+  sourceLabel,
+}: SensorCardProps) {
   const Icon = meta.key === 'mq4' || meta.key === 'mq135' ? GAS_ICONS[meta.key] : Wind;
   const style = STATUS_STYLES[status];
 
   return (
     <article
-      className={`bg-white border ${style.accentBorder} rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] p-4 flex flex-col justify-between gap-3`}
+      className={`bg-white border ${style.accentBorder} rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] p-4 flex flex-col justify-between gap-2.5`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -43,13 +50,21 @@ export function SensorCard({ meta, value, threshold, status }: SensorCardProps) 
         </span>
       </div>
 
-      <div className="flex items-baseline gap-1.5">
-        <span className="text-3xl xl:text-[36px] leading-none font-bold font-mono-tabular text-[#1E293B]">
-          {formatSensorValue(value, meta.decimals)}
-        </span>
-        <span className="text-sm font-mono-tabular text-[#64748B]">
-          {meta.unit}
-        </span>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-3xl xl:text-[36px] leading-none font-bold font-mono-tabular text-[#1E293B]">
+            {formatSensorValue(value, meta.decimals)}
+          </span>
+          <span className="text-sm font-mono-tabular text-[#64748B]">
+            {meta.unit}
+          </span>
+        </div>
+
+        {sourceLabel && (
+          <span className="text-[11px] font-mono-tabular text-[#64748B] bg-[#F4F5F7] border border-[#E2E5EA] rounded px-2 py-0.5 truncate max-w-full">
+            {sourceLabel}
+          </span>
+        )}
       </div>
 
       <ThresholdGaugeBar

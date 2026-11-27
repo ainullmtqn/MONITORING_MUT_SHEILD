@@ -10,6 +10,8 @@ interface Dht11CardProps {
   humidityThreshold: SensorThreshold;
   tempStatus: SensorStatus;
   humidityStatus: SensorStatus;
+  tempSourceLabel?: string;
+  humiditySourceLabel?: string;
 }
 
 function getCombinedStatus(a: SensorStatus, b: SensorStatus): SensorStatus {
@@ -25,6 +27,8 @@ export function Dht11Card({
   humidityThreshold,
   tempStatus,
   humidityStatus,
+  tempSourceLabel,
+  humiditySourceLabel,
 }: Dht11CardProps) {
   const combinedStatus = getCombinedStatus(tempStatus, humidityStatus);
   const style = STATUS_STYLES[combinedStatus];
@@ -38,6 +42,7 @@ export function Dht11Card({
       value: temperature,
       threshold: tempThreshold,
       status: tempStatus,
+      sourceLabel: tempSourceLabel,
     },
     {
       key: 'humidity' as const,
@@ -47,12 +52,13 @@ export function Dht11Card({
       value: humidity,
       threshold: humidityThreshold,
       status: humidityStatus,
+      sourceLabel: humiditySourceLabel,
     },
   ];
 
   return (
     <article
-      className={`bg-white border ${style.accentBorder} rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] p-3 flex flex-col justify-between gap-2.5 md:col-span-2 lg:col-span-1`}
+      className={`bg-white border ${style.accentBorder} rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] p-3 flex flex-col justify-between gap-2 md:col-span-2 lg:col-span-1`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
@@ -76,45 +82,61 @@ export function Dht11Card({
         </span>
       </div>
 
-      <div className="space-y-2">
-        {channels.map(({ key, shortLabel, Icon, meta, value, threshold, status }) => {
-          const chStyle = STATUS_STYLES[status];
-          return (
-            <div
-              key={key}
-              className="rounded border border-[#E2E5EA] bg-[#F4F5F7]/45 px-2.5 py-1.5 space-y-1"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Icon className="w-3.5 h-3.5 text-[#64748B] shrink-0" />
-                  <span className="text-xs font-medium text-[#64748B] truncate">
-                    {shortLabel}
-                  </span>
-                </div>
-                <div className="flex items-baseline gap-1 font-mono-tabular shrink-0">
-                  <span className="text-base font-bold text-[#1E293B]">
-                    {formatSensorValue(value, meta.decimals)}
-                  </span>
-                  <span className="text-[11px] text-[#64748B]">{meta.unit}</span>
-                  {status !== 'normal' && (
-                    <span className={`ml-1 text-[10px] font-semibold ${chStyle.textColor}`}>
-                      • {chStyle.label}
+      <div className="space-y-1.5">
+        {channels.map(
+          ({
+            key,
+            shortLabel,
+            Icon,
+            meta,
+            value,
+            threshold,
+            status,
+            sourceLabel,
+          }) => {
+            const chStyle = STATUS_STYLES[status];
+            return (
+              <div
+                key={key}
+                className="rounded border border-[#E2E5EA] bg-[#F4F5F7]/45 px-2.5 py-1.5 space-y-1"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <Icon className="w-3.5 h-3.5 text-[#64748B] shrink-0" />
+                    <span className="text-xs font-medium text-[#64748B] truncate">
+                      {shortLabel}
                     </span>
-                  )}
+                    {sourceLabel && (
+                      <span className="text-[10px] font-mono-tabular text-[#64748B] truncate hidden sm:inline">
+                        ({sourceLabel})
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-baseline gap-1 font-mono-tabular shrink-0">
+                    <span className="text-base font-bold text-[#1E293B]">
+                      {formatSensorValue(value, meta.decimals)}
+                    </span>
+                    <span className="text-[11px] text-[#64748B]">{meta.unit}</span>
+                    {status !== 'normal' && (
+                      <span className={`ml-1 text-[10px] font-semibold ${chStyle.textColor}`}>
+                        • {chStyle.label}
+                      </span>
+                    )}
+                  </div>
                 </div>
-              </div>
 
-              <ThresholdGaugeBar
-                meta={meta}
-                value={value}
-                threshold={threshold}
-                status={status}
-                size="compact"
-                showMaxUnit={false}
-              />
-            </div>
-          );
-        })}
+                <ThresholdGaugeBar
+                  meta={meta}
+                  value={value}
+                  threshold={threshold}
+                  status={status}
+                  size="compact"
+                  showMaxUnit={false}
+                />
+              </div>
+            );
+          }
+        )}
       </div>
     </article>
   );

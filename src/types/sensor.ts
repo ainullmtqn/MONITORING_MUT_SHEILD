@@ -38,11 +38,43 @@ export interface SensorReadingValues {
 export interface TelemetryPoint extends SensorReadingValues {
   timestamp: string;
   epochMs: number;
+  mq4Source?: string;
+  mq135Source?: string;
+  temperatureSource?: string;
+  humiditySource?: string;
 }
+
+export interface SensorNodeConfig {
+  id: string;
+  code: string;
+  shortName: string;
+  name: string;
+  baseline: SensorReadingValues;
+}
+
+export interface SensorNodeState {
+  config: SensorNodeConfig;
+  latest: TelemetryPoint;
+  history: TelemetryPoint[];
+  statuses: Record<SensorKey, SensorStatus>;
+  overallStatus: SensorStatus;
+}
+
+export interface PeakSensorReading {
+  value: number;
+  status: SensorStatus;
+  sourceNodeId: string;
+  sourceNodeName: string;
+  sourceShortName: string;
+}
+
+export type PeakReadingsMap = Record<SensorKey, PeakSensorReading>;
 
 export interface AlertLogEntry {
   id: string;
   timestamp: string;
+  nodeId: string;
+  nodeName: string;
   sensorKey: SensorKey;
   sensorName: string;
   value: number;

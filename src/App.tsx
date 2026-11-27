@@ -3,23 +3,26 @@ import { AlertBanner } from './components/AlertBanner';
 import { AlertLog } from './components/AlertLog';
 import { Dht11Card } from './components/Dht11Card';
 import { Header } from './components/Header';
+import { NodeStatusPanel } from './components/NodeStatusPanel';
 import { SensorCard } from './components/SensorCard';
 import { TelemetryChart } from './components/TelemetryChart';
 import { ThresholdModal } from './components/ThresholdModal';
-import { SENSOR_METADATA } from './constants/sensors';
+import { SENSOR_METADATA, SENSOR_NODES } from './constants/sensors';
 import { useAlertAudio } from './hooks/useAlertAudio';
 import { useSensorStream } from './hooks/useSensorStream';
 
 export function App() {
+  const [selectedNodeId, setSelectedNodeId] = useState<string>('all');
   const [isThresholdModalOpen, setIsThresholdModalOpen] = useState(false);
   const { isAudioEnabled, toggleAudio, triggerAlarmTone } = useAlertAudio();
 
   const {
-    latest,
-    history,
+    nodes,
+    sortedNodes,
+    peakReadings,
+    peakHistory,
     thresholds,
     updateThresholds,
-    statuses,
     overallStatus,
     alertLogs,
     clearAlertLogs,
@@ -28,9 +31,70 @@ export function App() {
     sampleCount,
   } = useSensorStream(triggerAlarmTone);
 
+  const isAllNodesMode = selectedNodeId === 'all';
+  const activeNode = isAllNodesMode
+    ? null
+    : nodes.find((n) => n.config.id === selectedNodeId) ?? null;
+
+  const mq4Display = activeNode
+    ? {
+        value: activeNode.latest.mq4,
+        status: activeNode.statuses.mq4,
+        sourceLabel: `Sumber: ${activeNode.config.name}`,
+      }
+    : {
+        value: peakReadings.mq4.value,
+        status: peakReadings.mq4.status,
+        sourceLabel: `Tertinggi: ${peakReadings.mq4.sourceNodeName} (dari ${nodes.length} titik)`,
+      };
+
+  const mq135Display = activeNode
+    ? {
+        value: activeNode.latest.mq135,
+        status: activeNode.statuses.mq135,
+        sourceLabel: `Sumber: ${activeNode.config.name}`,
+      }
+    : {
+        value: peakReadings.mq135.value,
+        status: peakReadings.mq135.status,
+        sourceLabel: `Tertinggi: ${peakReadings.mq135.sourceNodeName} (dari ${nodes.length} titik)`,
+      };
+
+  const tempDisplay = activeNode
+    ? {
+        value: activeNode.latest.temperature,
+        status: activeNode.statuses.temperature,
+        sourceLabel: activeNode.config.shortName,
+      }
+    : {
+        value: peakReadings.temperature.value,
+        status: peakReadings.temperature.status,
+        sourceLabel: `Max: ${peakReadings.temperature.sourceShortName}`,
+      };
+
+  const humidityDisplay = activeNode
+    ? {
+        value: activeNode.latest.humidity,
+        status: activeNode.statuses.humidity,
+        sourceLabel: activeNode.config.shortName,
+      }
+    : {
+        value: peakReadings.humidity.value,
+        status: peakReadings.humidity.status,
+        sourceLabel: `Max: ${peakReadings.humidity.sourceShortName}`,
+      };
+
+  const chartHistory = activeNode ? activeNode.history : peakHistory;
+  const activeNodeLabel = activeNode
+    ? activeNode.config.name
+    : `Semua Titik (${nodes.length} Titik — Nilai Puncak)`;
+
   return (
     <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#F4F5F7] text-[#1E293B] p-3 lg:p-4 flex flex-col gap-3">
       <Header
+        nodes={SENSOR_NODES}
+        selectedNodeId={selectedNodeId}
+        onSelectNode={setSelectedNodeId}
         isConnected={isConnected}
         lastUpdatedAt={lastUpdatedAt}
         sampleCount={sampleCount}
@@ -39,46 +103,56 @@ export function App() {
         onOpenThresholdModal={() => setIsThresholdModalOpen(true)}
       />
 
-      <AlertBanner
-        latest={latest}
-        statuses={statuses}
-        overallStatus={overallStatus}
-      />
+      <AlertBanner nodes={nodes} overallStatus={overallStatus} />
 
       <section
         aria-label="Ringkasan nilai sensor real-time"
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1.8fr_1.8fr_1.4fr] gap-3 shrink-0"
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[35fr_35fr_30fr] gap-3 shrink-0"
       >
         <SensorCard
           meta={SENSOR_METADATA.mq4}
-          value={latest.mq4}
+          value={mq4Display.value}
           threshold={thresholds.mq4}
-          status={statuses.mq4}
+          status={mq4Display.status}
+          sourceLabel={mq4Display.sourceLabel}
         />
         <SensorCard
           meta={SENSOR_METADATA.mq135}
-          value={latest.mq135}
+          value={mq135Display.value}
           threshold={thresholds.mq135}
-          status={statuses.mq135}
+          status={mq135Display.status}
+          sourceLabel={mq135Display.sourceLabel}
         />
         <Dht11Card
-          temperature={latest.temperature}
-          humidity={latest.humidity}
+          temperature={tempDisplay.value}
+          humidity={humidityDisplay.value}
           tempThreshold={thresholds.temperature}
           humidityThreshold={thresholds.humidity}
-          tempStatus={statuses.temperature}
-          humidityStatus={statuses.humidity}
+          tempStatus={tempDisplay.status}
+          humidityStatus={humidityDisplay.status}
+          tempSourceLabel={tempDisplay.sourceLabel}
+          humiditySourceLabel={humidityDisplay.sourceLabel}
         />
       </section>
 
       <section
-        aria-label="Grafik telemetri dan riwayat peringatan"
+        aria-label="Grafik telemetri, status titik, dan riwayat peringatan"
         className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[65fr_35fr] gap-3"
       >
         <div className="min-h-0 h-full">
-          <TelemetryChart history={history} />
+          <TelemetryChart
+            history={chartHistory}
+            activeNodeLabel={activeNodeLabel}
+            isAllNodesMode={isAllNodesMode}
+          />
         </div>
-        <div className="min-h-0 h-full">
+
+        <div className="min-h-0 h-full flex flex-col gap-3">
+          <NodeStatusPanel
+            sortedNodes={sortedNodes}
+            selectedNodeId={selectedNodeId}
+            onSelectNode={setSelectedNodeId}
+          />
           <AlertLog logs={alertLogs} onClearLogs={clearAlertLogs} />
         </div>
       </section>

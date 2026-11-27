@@ -4,22 +4,21 @@ import {
   SENSOR_ORDER,
   formatSensorValue,
 } from '../constants/sensors';
-import { SensorReadingValues, SensorStatus } from '../types/sensor';
+import { SensorKey, SensorNodeState, SensorStatus } from '../types/sensor';
 
 interface AlertBannerProps {
-  latest: SensorReadingValues;
-  statuses: Record<keyof SensorReadingValues, SensorStatus>;
+  nodes: SensorNodeState[];
   overallStatus: SensorStatus;
 }
 
-export function AlertBanner({
-  latest,
-  statuses,
-  overallStatus,
-}: AlertBannerProps) {
-  const dangerSensors = SENSOR_ORDER.filter((k) => statuses[k] === 'danger');
-  const warningSensors = SENSOR_ORDER.filter((k) => statuses[k] === 'warning');
+interface TriggeredItem {
+  nodeName: string;
+  sensorKey: SensorKey;
+  value: number;
+  status: Exclude<SensorStatus, 'normal'>;
+}
 
+export function AlertBanner({ nodes, overallStatus }: AlertBannerProps) {
   if (overallStatus === 'normal') {
     return (
       <div
@@ -29,7 +28,7 @@ export function AlertBanner({
         <div className="flex items-center gap-2.5 min-w-0">
           <CheckCircle2 className="w-4 h-4 text-[#15803D] shrink-0" />
           <p className="text-xs sm:text-sm text-[#15803D] truncate">
-            <span className="font-semibold">STATUS NORMAL:</span> Seluruh 4 kanal sensor berada di bawah ambang batas waspada.
+            <span className="font-semibold">STATUS NORMAL:</span> Seluruh {nodes.length} titik sensor berada di bawah ambang batas waspada.
           </p>
         </div>
         <span className="hidden sm:inline-block text-[11px] font-mono-tabular text-[#15803D] shrink-0">
@@ -39,19 +38,48 @@ export function AlertBanner({
     );
   }
 
+  const triggeredItems: TriggeredItem[] = [];
+  for (const node of nodes) {
+    for (const key of SENSOR_ORDER) {
+      const st = node.statuses[key];
+      if (st !== 'normal') {
+        triggeredItems.push({
+          nodeName: node.config.name,
+          sensorKey: key,
+          value: node.latest[key],
+          status: st,
+        });
+      }
+    }
+  }
+
+  triggeredItems.sort((a, b) => {
+    if (a.status !== b.status) return a.status === 'danger' ? -1 : 1;
+    return b.value - a.value;
+  });
+
   const isDanger = overallStatus === 'danger';
-  const prioritizedKeys = isDanger ? dangerSensors : warningSensors;
-  const primaryMeta = SENSOR_METADATA[prioritizedKeys[0]];
+  const prioritized = triggeredItems.filter((item) =>
+    isDanger ? item.status === 'danger' : item.status === 'warning'
+  );
+  const primary = prioritized[0] ?? triggeredItems[0];
+  const primaryMeta = SENSOR_METADATA[primary.sensorKey];
   const advice = isDanger
     ? primaryMeta.actionAdvice.danger
     : primaryMeta.actionAdvice.warning;
 
-  const affectedSummary = [...dangerSensors, ...warningSensors]
-    .map((key) => {
-      const meta = SENSOR_METADATA[key];
-      return `${meta.label} (${formatSensorValue(latest[key], meta.decimals)} ${meta.unit})`;
+  const affectedSummary = triggeredItems
+    .slice(0, 3)
+    .map((item) => {
+      const meta = SENSOR_METADATA[item.sensorKey];
+      return `[${item.nodeName}] ${meta.label} (${formatSensorValue(item.value, meta.decimals)} ${meta.unit})`;
     })
     .join(', ');
+
+  const extraCount =
+    triggeredItems.length > 3 ? ` +${triggeredItems.length - 3} lainnya` : '';
+
+  const affectedNodesCount = new Set(prioritized.map((i) => i.nodeName)).size;
 
   return (
     <div
@@ -72,7 +100,10 @@ export function AlertBanner({
           <span className="font-semibold mr-1.5">
             {isDanger ? 'PERINGATAN BAHAYA:' : 'PERINGATAN WASPADA:'}
           </span>
-          <span className="font-mono-tabular font-medium">{affectedSummary}</span>
+          <span className="font-mono-tabular font-medium">
+            {affectedSummary}
+            {extraCount}
+          </span>
           <span className="mx-1.5 text-[#64748B]">—</span>
           <span className="font-medium">Saran: {advice}</span>
         </div>
@@ -85,7 +116,7 @@ export function AlertBanner({
             : 'bg-white border-[#FDE68A] text-[#B45309]'
         }`}
       >
-        {prioritizedKeys.length} SENSOR TERPICU
+        {affectedNodesCount} TITIK TERPICU
       </span>
     </div>
   );

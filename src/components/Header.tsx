@@ -1,6 +1,10 @@
-import { Activity, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
+import { Activity, MapPin, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
+import { SensorNodeConfig } from '../types/sensor';
 
 interface HeaderProps {
+  nodes: SensorNodeConfig[];
+  selectedNodeId: string;
+  onSelectNode: (nodeId: string) => void;
   isConnected: boolean;
   lastUpdatedAt: string;
   sampleCount: number;
@@ -10,6 +14,9 @@ interface HeaderProps {
 }
 
 export function Header({
+  nodes,
+  selectedNodeId,
+  onSelectNode,
   isConnected,
   lastUpdatedAt,
   sampleCount,
@@ -17,6 +24,8 @@ export function Header({
   onToggleAudio,
   onOpenThresholdModal,
 }: HeaderProps) {
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+
   return (
     <header className="bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
       <div className="flex items-center gap-3 min-w-0">
@@ -28,12 +37,32 @@ export function Header({
             Dashboard Monitoring Sensor IoT
           </h1>
           <p className="text-[11px] text-[#64748B] font-mono-tabular truncate">
-            UNIT: LAB-ENV-01 • MQ-4 / MQ-135 / DHT11 • SAMPEL #{sampleCount}
+            {selectedNode
+              ? `${selectedNode.code}: ${selectedNode.name} • MQ-4 / MQ-135 / DHT11 • SAMPEL #${sampleCount}`
+              : `MULTI-TITIK (${nodes.length} NODE) • MQ-4 / MQ-135 / DHT11 • SAMPEL #${sampleCount}`}
           </p>
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
+        <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-[#E2E5EA] bg-[#F4F5F7]/60 text-xs text-[#1E293B]">
+          <MapPin className="w-3.5 h-3.5 text-[#64748B] shrink-0" />
+          <span className="sr-only">Pilih titik sensor</span>
+          <select
+            value={selectedNodeId}
+            onChange={(e) => onSelectNode(e.target.value)}
+            className="bg-transparent text-xs font-medium text-[#1E293B] focus:outline-none cursor-pointer pr-1"
+            aria-label="Filter titik sensor"
+          >
+            <option value="all">Semua Titik (Nilai Puncak)</option>
+            {nodes.map((node) => (
+              <option key={node.id} value={node.id}>
+                {node.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
         <div
           className={`flex items-center gap-2 px-2.5 py-1.5 rounded border text-xs font-mono-tabular ${
             isConnected

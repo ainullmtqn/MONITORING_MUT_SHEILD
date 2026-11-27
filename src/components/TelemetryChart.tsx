@@ -13,6 +13,8 @@ import { ChartFilter, SensorKey, TelemetryPoint } from '../types/sensor';
 
 interface TelemetryChartProps {
   history: TelemetryPoint[];
+  activeNodeLabel: string;
+  isAllNodesMode: boolean;
 }
 
 const FILTER_TABS: { id: ChartFilter; label: string }[] = [
@@ -35,21 +37,21 @@ interface CustomDotProps {
 
 function TriangleDot({ cx, cy, stroke }: CustomDotProps) {
   if (cx === undefined || cy === undefined) return null;
-  const r = 3.2;
+  const r = 3.5;
   const points = `${cx},${cy - r} ${cx - r},${cy + r * 0.85} ${cx + r},${cy + r * 0.85}`;
   return (
     <polygon
       points={points}
       fill={stroke ?? '#D97706'}
       stroke="#FFFFFF"
-      strokeWidth={1}
+      strokeWidth={1.5}
     />
   );
 }
 
 function SquareDot({ cx, cy, stroke }: CustomDotProps) {
   if (cx === undefined || cy === undefined) return null;
-  const size = 5;
+  const size = 6;
   return (
     <rect
       x={cx - size / 2}
@@ -58,7 +60,7 @@ function SquareDot({ cx, cy, stroke }: CustomDotProps) {
       height={size}
       fill={stroke ?? '#475569'}
       stroke="#FFFFFF"
-      strokeWidth={1}
+      strokeWidth={1.5}
     />
   );
 }
@@ -68,39 +70,61 @@ interface CustomTooltipProps {
   payload?: Array<{
     dataKey?: string;
     value?: number;
-    color?: string;
+    payload?: TelemetryPoint;
   }>;
   label?: string;
+  activeNodeLabel: string;
+  isAllNodesMode: boolean;
 }
 
-function ChartTooltip({ active, payload, label }: CustomTooltipProps) {
+function ChartTooltip({
+  active,
+  payload,
+  label,
+  activeNodeLabel,
+  isAllNodesMode,
+}: CustomTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
+  const point = payload[0]?.payload;
 
   return (
     <div className="bg-white border border-[#E2E5EA] rounded shadow-[0_1px_3px_rgba(15,23,42,0.08)] px-3 py-2 text-xs">
-      <div className="font-mono-tabular text-[11px] text-[#64748B] border-b border-[#E2E5EA] pb-1 mb-1.5">
-        Waktu: {label}
+      <div className="font-mono-tabular text-[11px] text-[#64748B] border-b border-[#E2E5EA] pb-1 mb-1.5 space-y-0.5">
+        <div>Waktu: {label}</div>
+        <div className="text-[#1E293B] font-medium">
+          Titik: {activeNodeLabel}
+        </div>
       </div>
       <div className="space-y-1">
         {payload.map((entry) => {
           const key = entry.dataKey as SensorKey | undefined;
           if (!key || !(key in SENSOR_METADATA)) return null;
           const meta = SENSOR_METADATA[key];
+          const sourceField = `${key}Source` as keyof TelemetryPoint;
+          const sourceName =
+            isAllNodesMode && point && typeof point[sourceField] === 'string'
+              ? (point[sourceField] as string)
+              : null;
+
           return (
-            <div
-              key={key}
-              className="flex items-center justify-between gap-4 font-mono-tabular"
-            >
-              <span className="flex items-center gap-1.5 text-[#1E293B]">
-                <span
-                  className="w-2 h-2 rounded-full inline-block"
-                  style={{ backgroundColor: meta.chartColor }}
-                />
-                {meta.label}
-              </span>
-              <span className="font-semibold text-[#1E293B]">
-                {Number(entry.value ?? 0).toFixed(meta.decimals)} {meta.unit}
-              </span>
+            <div key={key} className="font-mono-tabular">
+              <div className="flex items-center justify-between gap-4">
+                <span className="flex items-center gap-1.5 text-[#1E293B]">
+                  <span
+                    className="w-2 h-2 rounded-full inline-block"
+                    style={{ backgroundColor: meta.chartColor }}
+                  />
+                  {meta.label}
+                </span>
+                <span className="font-semibold text-[#1E293B]">
+                  {Number(entry.value ?? 0).toFixed(meta.decimals)} {meta.unit}
+                </span>
+              </div>
+              {sourceName && (
+                <div className="text-[10px] text-[#64748B] pl-3.5">
+                  Puncak: {sourceName}
+                </div>
+              )}
             </div>
           );
         })}
@@ -109,7 +133,11 @@ function ChartTooltip({ active, payload, label }: CustomTooltipProps) {
   );
 }
 
-export function TelemetryChart({ history }: TelemetryChartProps) {
+export function TelemetryChart({
+  history,
+  activeNodeLabel,
+  isAllNodesMode,
+}: TelemetryChartProps) {
   const [filter, setFilter] = useState<ChartFilter>('all');
   const activeSeries = SERIES_BY_FILTER[filter];
   const showGasAxis = filter === 'all' || filter === 'gas';
@@ -120,10 +148,11 @@ export function TelemetryChart({ history }: TelemetryChartProps) {
       <div className="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-[#E2E5EA] shrink-0">
         <div>
           <h2 className="text-sm font-semibold text-[#1E293B]">
-            Grafik Telemetri Real-Time
+            Grafik Telemetri Real-Time — {activeNodeLabel}
           </h2>
           <p className="text-[11px] text-[#64748B] font-mono-tabular">
-            20 SAMPEL TERAKHIR • GARIS DATAR DENGAN TITIK (MARKERS) • TANPA INTERPOLASI AREA
+            20 SAMPEL TERAKHIR • GARIS DATAR DENGAN TITIK (MARKERS) •{' '}
+            {isAllNodesMode ? 'NILAI PUNCAK ANTAR TITIK' : 'DATA KHUSUS TITIK TERPILIH'}
           </p>
         </div>
 
@@ -162,18 +191,20 @@ export function TelemetryChart({ history }: TelemetryChartProps) {
             <div key={key} className="flex items-center gap-1.5 font-mono-tabular">
               <span
                 className={`inline-flex items-center justify-center ${
-                  isGas ? 'w-4 h-[3px]' : 'w-3 h-[1.5px]'
+                  isGas ? 'w-4 h-[2.5px]' : 'w-3 h-[1.5px]'
                 }`}
                 style={{ backgroundColor: meta.chartColor }}
               >
-                {isGas && (
-                  <span
-                    className="w-2 h-2 rounded-full border border-white"
-                    style={{ backgroundColor: meta.chartColor }}
-                  />
-                )}
+                <span
+                  className="w-2 h-2 rounded-full border border-white"
+                  style={{ backgroundColor: meta.chartColor }}
+                />
               </span>
-              <span className={isGas ? 'text-[#1E293B] font-semibold' : 'text-[#64748B] font-medium'}>
+              <span
+                className={
+                  isGas ? 'text-[#1E293B] font-semibold' : 'text-[#64748B] font-medium'
+                }
+              >
                 {meta.label}
               </span>
               <span>({meta.unit})</span>
@@ -188,10 +219,7 @@ export function TelemetryChart({ history }: TelemetryChartProps) {
             data={history}
             margin={{ top: 10, right: 12, left: -10, bottom: 2 }}
           >
-            <CartesianGrid
-              stroke="#E2E5EA"
-              strokeDasharray="3 3"
-            />
+            <CartesianGrid stroke="#E2E5EA" strokeDasharray="3 3" />
             <XAxis
               dataKey="timestamp"
               tick={{
@@ -235,7 +263,14 @@ export function TelemetryChart({ history }: TelemetryChartProps) {
               />
             )}
 
-            <Tooltip content={<ChartTooltip />} />
+            <Tooltip
+              content={
+                <ChartTooltip
+                  activeNodeLabel={activeNodeLabel}
+                  isAllNodesMode={isAllNodesMode}
+                />
+              }
+            />
 
             {showDhtAxis && (
               <>
@@ -246,7 +281,7 @@ export function TelemetryChart({ history }: TelemetryChartProps) {
                   stroke={SENSOR_METADATA.temperature.chartColor}
                   strokeWidth={1.5}
                   dot={<TriangleDot stroke={SENSOR_METADATA.temperature.chartColor} />}
-                  activeDot={{ r: 4.5, stroke: '#FFFFFF', strokeWidth: 1.5 }}
+                  activeDot={{ r: 6, stroke: '#FFFFFF', strokeWidth: 1.5 }}
                   isAnimationActive={false}
                 />
                 <Line
@@ -256,7 +291,7 @@ export function TelemetryChart({ history }: TelemetryChartProps) {
                   stroke={SENSOR_METADATA.humidity.chartColor}
                   strokeWidth={1.5}
                   dot={<SquareDot stroke={SENSOR_METADATA.humidity.chartColor} />}
-                  activeDot={{ r: 4.5, stroke: '#FFFFFF', strokeWidth: 1.5 }}
+                  activeDot={{ r: 6, stroke: '#FFFFFF', strokeWidth: 1.5 }}
                   isAnimationActive={false}
                 />
               </>
@@ -269,14 +304,14 @@ export function TelemetryChart({ history }: TelemetryChartProps) {
                   type="linear"
                   dataKey="mq135"
                   stroke={SENSOR_METADATA.mq135.chartColor}
-                  strokeWidth={2.75}
+                  strokeWidth={2.5}
                   dot={{
                     r: 3.5,
                     fill: SENSOR_METADATA.mq135.chartColor,
                     stroke: '#FFFFFF',
                     strokeWidth: 1.5,
                   }}
-                  activeDot={{ r: 5, stroke: '#FFFFFF', strokeWidth: 1.5 }}
+                  activeDot={{ r: 6, stroke: '#FFFFFF', strokeWidth: 1.5 }}
                   isAnimationActive={false}
                 />
                 <Line
@@ -284,14 +319,14 @@ export function TelemetryChart({ history }: TelemetryChartProps) {
                   type="linear"
                   dataKey="mq4"
                   stroke={SENSOR_METADATA.mq4.chartColor}
-                  strokeWidth={2.75}
+                  strokeWidth={2.5}
                   dot={{
                     r: 3.5,
                     fill: SENSOR_METADATA.mq4.chartColor,
                     stroke: '#FFFFFF',
                     strokeWidth: 1.5,
                   }}
-                  activeDot={{ r: 5, stroke: '#FFFFFF', strokeWidth: 1.5 }}
+                  activeDot={{ r: 6, stroke: '#FFFFFF', strokeWidth: 1.5 }}
                   isAnimationActive={false}
                 />
               </>
