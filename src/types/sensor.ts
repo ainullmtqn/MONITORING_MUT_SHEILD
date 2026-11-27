@@ -2,6 +2,8 @@ export type SensorKey = 'mq4' | 'mq135' | 'temperature' | 'humidity';
 
 export type SensorStatus = 'normal' | 'warning' | 'danger';
 
+export type DoorStatus = 'OPEN' | 'LOCKED';
+
 export type ChartFilter = 'all' | 'gas' | 'dht11';
 
 export interface SensorThreshold {
@@ -43,6 +45,7 @@ export interface MqttSensorPayload {
   kelembapan?: number;
   jarak?: number;
   rfid?: boolean;
+  door?: string;
   status?: string;
 }
 
@@ -51,6 +54,7 @@ export interface TelemetryPoint extends SensorReadingValues {
   epochMs: number;
   jarak?: number;
   rfid?: boolean;
+  door?: DoorStatus;
   deviceStatus?: string;
   mq4Source?: string;
   mq135Source?: string;
@@ -77,6 +81,7 @@ export interface SensorNodeState {
   history: TelemetryPoint[];
   statuses: Record<SensorKey, SensorStatus>;
   overallStatus: SensorStatus;
+  door: DoorStatus;
 }
 
 export interface PeakSensorReading {
@@ -100,4 +105,23 @@ export interface AlertLogEntry {
   unit: string;
   thresholdValue: number;
   status: Exclude<SensorStatus, 'normal'>;
+}
+
+export interface RfidAccessLogEntry {
+  id: string;
+  timestamp: string;
+  nodeId: string;
+  nodeCode: string;
+  nodeName: string;
+  nodeLocationTag: string;
+  door: DoorStatus;
+  accessResult: 'DITERIMA' | 'DITOLAK';
+  mq4Value: number;
+}
+
+export interface RfidToastNotification {
+  id: string;
+  nodeCode: string;
+  granted: boolean;
+  message: string;
 }

@@ -1,9 +1,11 @@
 import { useState } from 'react';
+import { AccessLogPanel } from './components/AccessLogPanel';
 import { AlertBanner } from './components/AlertBanner';
 import { AlertLog } from './components/AlertLog';
 import { Dht11Card } from './components/Dht11Card';
 import { Header } from './components/Header';
 import { NodeStatusPanel } from './components/NodeStatusPanel';
+import { RfidToastContainer } from './components/RfidToastContainer';
 import { SensorCard } from './components/SensorCard';
 import { TelemetryChart } from './components/TelemetryChart';
 import { ThresholdModal } from './components/ThresholdModal';
@@ -16,7 +18,7 @@ import { useAlertAudio } from './hooks/useAlertAudio';
 import { useSensorStream } from './hooks/useSensorStream';
 import { SensorNodeConfig } from './types/sensor';
 
-type RightPanelTab = 'nodes' | 'logs';
+type RightPanelTab = 'nodes' | 'logs' | 'access';
 
 function formatPeakSource(node: SensorNodeConfig): string {
   return `Tertinggi: ${node.code} (${formatNodeLocation(node)})`;
@@ -42,6 +44,10 @@ export function App() {
     overallStatus,
     alertLogs,
     clearAlertLogs,
+    accessLogs,
+    clearAccessLogs,
+    toasts,
+    dismissToast,
     isConnected,
     lastUpdatedAt,
     sampleCount,
@@ -114,9 +120,12 @@ export function App() {
 
   return (
     <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#F4F5F7] text-[#1E293B] p-2.5 lg:p-3.5 flex flex-col gap-2.5">
+      <RfidToastContainer toasts={toasts} onDismiss={dismissToast} />
+
       <Header
         nodes={SENSOR_NODES}
         selectedNodeId={selectedNodeId}
+        selectedNodeDoor={activeNode?.door}
         onSelectNode={setSelectedNodeId}
         isConnected={isConnected}
         lastUpdatedAt={lastUpdatedAt}
@@ -174,15 +183,15 @@ export function App() {
         <div className="min-h-[260px] lg:min-h-0 h-full bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex flex-col overflow-hidden">
           <div
             role="tablist"
-            aria-label="Panel kanan monitoring titik dan riwayat peringatan"
-            className="grid grid-cols-2 border-b border-[#E2E5EA] bg-[#F4F5F7] p-1 gap-1 shrink-0"
+            aria-label="Panel kanan monitoring titik, peringatan, dan log akses"
+            className="grid grid-cols-3 border-b border-[#E2E5EA] bg-[#F4F5F7] p-1 gap-1 shrink-0"
           >
             <button
               type="button"
               role="tab"
               aria-selected={rightTab === 'nodes'}
               onClick={() => setRightTab('nodes')}
-              className={`px-2.5 py-1.5 rounded-[3px] text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+              className={`px-2 py-1.5 rounded-[3px] text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer ${
                 rightTab === 'nodes'
                   ? 'bg-white text-[#1E293B] border border-[#E2E5EA]'
                   : 'text-[#64748B] hover:text-[#1E293B] border border-transparent'
@@ -190,7 +199,7 @@ export function App() {
             >
               <span className="truncate">Status Titik</span>
               <span
-                className={`px-1.5 py-0.2 rounded text-[10px] font-mono-tabular font-semibold ${
+                className={`px-1 py-0.2 rounded text-[10px] font-mono-tabular font-semibold ${
                   triggeredNodeCount > 0
                     ? 'bg-[#FEF2F2] text-[#B91C1C] border border-[#FECACA]'
                     : 'bg-[#F4F5F7] text-[#64748B] border border-[#E2E5EA]'
@@ -205,21 +214,44 @@ export function App() {
               role="tab"
               aria-selected={rightTab === 'logs'}
               onClick={() => setRightTab('logs')}
-              className={`px-2.5 py-1.5 rounded-[3px] text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+              className={`px-2 py-1.5 rounded-[3px] text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer ${
                 rightTab === 'logs'
                   ? 'bg-white text-[#1E293B] border border-[#E2E5EA]'
                   : 'text-[#64748B] hover:text-[#1E293B] border border-transparent'
               }`}
             >
-              <span className="truncate">Riwayat Peringatan</span>
+              <span className="truncate">Peringatan</span>
               <span
-                className={`px-1.5 py-0.2 rounded text-[10px] font-mono-tabular font-semibold ${
+                className={`px-1 py-0.2 rounded text-[10px] font-mono-tabular font-semibold ${
                   alertLogs.length > 0
                     ? 'bg-[#FFFBEB] text-[#B45309] border border-[#FDE68A]'
                     : 'bg-[#F4F5F7] text-[#64748B] border border-[#E2E5EA]'
                 }`}
               >
                 {alertLogs.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={rightTab === 'access'}
+              onClick={() => setRightTab('access')}
+              className={`px-2 py-1.5 rounded-[3px] text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer ${
+                rightTab === 'access'
+                  ? 'bg-white text-[#1E293B] border border-[#E2E5EA]'
+                  : 'text-[#64748B] hover:text-[#1E293B] border border-transparent'
+              }`}
+            >
+              <span className="truncate">Log Akses</span>
+              <span
+                className={`px-1 py-0.2 rounded text-[10px] font-mono-tabular font-semibold ${
+                  accessLogs.length > 0
+                    ? 'bg-[#F0F9FF] text-[#0369A1] border border-[#BAE6FD]'
+                    : 'bg-[#F4F5F7] text-[#64748B] border border-[#E2E5EA]'
+                }`}
+              >
+                {accessLogs.length}
               </span>
             </button>
           </div>
@@ -232,10 +264,16 @@ export function App() {
                 onSelectNode={setSelectedNodeId}
                 embedded
               />
-            ) : (
+            ) : rightTab === 'logs' ? (
               <AlertLog
                 logs={alertLogs}
                 onClearLogs={clearAlertLogs}
+                embedded
+              />
+            ) : (
+              <AccessLogPanel
+                logs={accessLogs}
+                onClearLogs={clearAccessLogs}
                 embedded
               />
             )}

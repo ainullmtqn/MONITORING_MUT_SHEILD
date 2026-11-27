@@ -1,10 +1,12 @@
 import { Activity, MapPin, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
 import { formatCoordinates } from '../constants/sensors';
-import { SensorNodeConfig } from '../types/sensor';
+import { DoorStatus, SensorNodeConfig } from '../types/sensor';
+import { DoorBadge } from './DoorBadge';
 
 interface HeaderProps {
   nodes: SensorNodeConfig[];
   selectedNodeId: string;
+  selectedNodeDoor?: DoorStatus;
   onSelectNode: (nodeId: string) => void;
   isConnected: boolean;
   lastUpdatedAt: string;
@@ -17,6 +19,7 @@ interface HeaderProps {
 export function Header({
   nodes,
   selectedNodeId,
+  selectedNodeDoor,
   onSelectNode,
   isConnected,
   lastUpdatedAt,
@@ -126,6 +129,12 @@ export function Header({
             <span>
               Kedalaman: <strong className="text-[#1E293B]">{selectedNode.depth}</strong>
             </span>
+            {selectedNodeDoor && (
+              <span className="inline-flex items-center gap-1.5">
+                <span>Pintu:</span>
+                <DoorBadge door={selectedNodeDoor} />
+              </span>
+            )}
           </div>
           <button
             type="button"

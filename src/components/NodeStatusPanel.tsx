@@ -1,6 +1,7 @@
 import { Layers } from 'lucide-react';
 import { formatNodeLocation, formatSensorValue } from '../constants/sensors';
 import { SensorNodeState } from '../types/sensor';
+import { DoorBadge } from './DoorBadge';
 import { STATUS_STYLES } from './ThresholdGaugeBar';
 
 interface NodeStatusPanelProps {
@@ -50,10 +51,11 @@ export function NodeStatusPanel({
         <table className="w-full text-left border-collapse">
           <thead className="sticky top-0 bg-[#F4F5F7] border-b border-[#E2E5EA] text-[10px] font-mono-tabular uppercase tracking-wide text-[#64748B]">
             <tr>
-              <th className="py-1.5 pl-3.5 pr-2 font-semibold">Titik & Koordinat</th>
-              <th className="py-1.5 px-2 text-right font-semibold">MQ-4</th>
-              <th className="py-1.5 px-2 text-right font-semibold">MQ-135</th>
-              <th className="py-1.5 pl-2 pr-3.5 text-right font-semibold">Status</th>
+              <th className="py-1.5 pl-3 pr-1.5 font-semibold">Titik & Koordinat</th>
+              <th className="py-1.5 px-1.5 text-right font-semibold">MQ-4</th>
+              <th className="py-1.5 px-1.5 text-right font-semibold">MQ-135</th>
+              <th className="py-1.5 px-1.5 text-center font-semibold">Pintu</th>
+              <th className="py-1.5 pl-1.5 pr-3 text-right font-semibold">Status</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-[#E2E5EA] text-xs">
@@ -80,7 +82,7 @@ export function NodeStatusPanel({
                       : 'hover:bg-[#F8FAFC]'
                   }`}
                 >
-                  <td className="py-2 pl-3.5 pr-2 max-w-[195px]">
+                  <td className="py-2 pl-3 pr-1.5 max-w-[165px]">
                     <div
                       className={`text-xs truncate ${
                         isSelected ? 'font-semibold text-[#1D4ED8]' : 'font-medium text-[#1E293B]'
@@ -95,15 +97,18 @@ export function NodeStatusPanel({
                       {formatNodeLocation(node.config)}
                     </div>
                   </td>
-                  <td className="py-2 px-2 text-right font-mono-tabular text-[#1E293B] whitespace-nowrap align-middle">
+                  <td className="py-2 px-1.5 text-right font-mono-tabular text-[#1E293B] whitespace-nowrap align-middle">
                     {formatSensorValue(node.latest.mq4, 0)}
                     <span className="text-[10px] text-[#64748B] ml-0.5">ppm</span>
                   </td>
-                  <td className="py-2 px-2 text-right font-mono-tabular text-[#1E293B] whitespace-nowrap align-middle">
+                  <td className="py-2 px-1.5 text-right font-mono-tabular text-[#1E293B] whitespace-nowrap align-middle">
                     {formatSensorValue(node.latest.mq135, 0)}
                     <span className="text-[10px] text-[#64748B] ml-0.5">ppm</span>
                   </td>
-                  <td className="py-2 pl-2 pr-3.5 text-right whitespace-nowrap align-middle">
+                  <td className="py-2 px-1.5 text-center whitespace-nowrap align-middle">
+                    <DoorBadge door={node.door} />
+                  </td>
+                  <td className="py-2 pl-1.5 pr-3 text-right whitespace-nowrap align-middle">
                     <span
                       className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-mono-tabular font-semibold ${style.badge}`}
                     >

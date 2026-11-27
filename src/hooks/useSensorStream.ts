@@ -17,8 +17,11 @@ import {
 } from '../constants/sensors';
 import {
   AlertLogEntry,
+  DoorStatus,
   MqttSensorPayload,
   PeakReadingsMap,
+  RfidAccessLogEntry,
+  RfidToastNotification,
   SensorKey,
   SensorNodeConfig,
   SensorNodeState,
@@ -48,6 +51,14 @@ function toValidNumber(raw: unknown, min: number, max: number): number | null {
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) return null;
   return clamp(parsed, min, max);
+}
+
+function normalizeDoorStatus(raw: unknown, fallback: DoorStatus = 'LOCKED'): DoorStatus {
+  if (typeof raw !== 'string') return fallback;
+  const upper = raw.trim().toUpperCase();
+  if (upper === 'OPEN') return 'OPEN';
+  if (upper === 'LOCKED') return 'LOCKED';
+  return fallback;
 }
 
 function resolveTargetNode(
@@ -130,6 +141,10 @@ export interface UseSensorStreamResult {
   overallStatus: SensorStatus;
   alertLogs: AlertLogEntry[];
   clearAlertLogs: () => void;
+  accessLogs: RfidAccessLogEntry[];
+  clearAccessLogs: () => void;
+  toasts: RfidToastNotification[];
+  dismissToast: (id: string) => void;
   isConnected: boolean;
   lastUpdatedAt: string;
   sampleCount: number;
@@ -146,11 +161,20 @@ export function useSensorStream(
     return map;
   }, []);
 
+  const initialDoors = useMemo(() => {
+    return Object.fromEntries(
+      SENSOR_NODES.map((node) => [node.id, 'LOCKED' as DoorStatus])
+    );
+  }, []);
+
   const [historiesByNode, setHistoriesByNode] =
     useState<Record<string, TelemetryPoint[]>>(initialHistories);
+  const [doorByNode, setDoorByNode] = useState<Record<string, DoorStatus>>(initialDoors);
   const [peakHistory, setPeakHistory] = useState<TelemetryPoint[]>([]);
   const [thresholds, setThresholds] = useState<ThresholdMap>(DEFAULT_THRESHOLDS);
   const [alertLogs, setAlertLogs] = useState<AlertLogEntry[]>([]);
+  const [accessLogs, setAccessLogs] = useState<RfidAccessLogEntry[]>([]);
+  const [toasts, setToasts] = useState<RfidToastNotification[]>([]);
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [sampleCount, setSampleCount] = useState<number>(0);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('--:--:--');
@@ -166,6 +190,8 @@ export function useSensorStream(
   const latestByNodeRef = useRef<Record<string, TelemetryPoint>>(
     Object.fromEntries(SENSOR_NODES.map((node) => [node.id, createEmptyPoint()]))
   );
+  const doorRef = useRef<Record<string, DoorStatus>>(initialDoors);
+  const toastTimersRef = useRef<Record<string, number>>({});
 
   const prevStatusRef = useRef<Record<string, Record<SensorKey, SensorStatus>>>(
     Object.fromEntries(
@@ -175,6 +201,14 @@ export function useSensorStream(
       ])
     )
   );
+
+  const dismissToast = useCallback((id: string) => {
+    if (toastTimersRef.current[id]) {
+      window.clearTimeout(toastTimersRef.current[id]);
+      delete toastTimersRef.current[id];
+    }
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
 
   useEffect(() => {
     let disposed = false;
@@ -259,6 +293,18 @@ export function useSensorStream(
       const now = new Date();
       const timestamp = formatTimestamp(now);
       const epochMs = now.getTime();
+      const currentDoor = normalizeDoorStatus(
+        payload.door,
+        doorRef.current[targetNode.id] ?? 'LOCKED'
+      );
+      const isRfidTap = payload.rfid === true;
+
+      doorRef.current[targetNode.id] = currentDoor;
+      setDoorByNode((prev) =>
+        prev[targetNode.id] === currentDoor
+          ? prev
+          : { ...prev, [targetNode.id]: currentDoor }
+      );
 
       const point: TelemetryPoint = {
         mq4,
@@ -268,7 +314,8 @@ export function useSensorStream(
         timestamp,
         epochMs,
         jarak: typeof payload.jarak === 'number' ? payload.jarak : undefined,
-        rfid: typeof payload.rfid === 'boolean' ? payload.rfid : undefined,
+        rfid: isRfidTap,
+        door: currentDoor,
         deviceStatus: typeof payload.status === 'string' ? payload.status : undefined,
       };
 
@@ -305,6 +352,37 @@ export function useSensorStream(
         ...prev.slice(-(MAX_HISTORY_POINTS - 1)),
         peakSnapshot,
       ]);
+
+      if (isRfidTap) {
+        const granted = currentDoor === 'OPEN';
+        const accessEntry: RfidAccessLogEntry = {
+          id: `rfid-${epochMs}-${targetNode.id}-${Math.random().toString(36).slice(2, 6)}`,
+          timestamp,
+          nodeId: targetNode.id,
+          nodeCode: targetNode.code,
+          nodeName: targetNode.name,
+          nodeLocationTag: formatNodeLocationTag(targetNode),
+          door: currentDoor,
+          accessResult: granted ? 'DITERIMA' : 'DITOLAK',
+          mq4Value: mq4,
+        };
+        setAccessLogs((prev) => [accessEntry, ...prev].slice(0, MAX_ALERT_LOGS));
+
+        const toastId = `toast-${epochMs}-${targetNode.id}-${Math.random().toString(36).slice(2, 6)}`;
+        const toast: RfidToastNotification = {
+          id: toastId,
+          nodeCode: targetNode.code,
+          granted,
+          message: granted
+            ? `Akses RFID Diterima — [${targetNode.code}] Pintu Terbuka (5 detik)`
+            : `Akses RFID Ditolak — [${targetNode.code}] Kondisi Gas Berbahaya!`,
+        };
+        setToasts((prev) => [toast, ...prev].slice(0, 3));
+        toastTimersRef.current[toastId] = window.setTimeout(() => {
+          delete toastTimersRef.current[toastId];
+          setToasts((prev) => prev.filter((t) => t.id !== toastId));
+        }, 5000);
+      }
 
       const newEntries: AlertLogEntry[] = [];
       let highestStatus: SensorStatus = 'normal';
@@ -354,6 +432,10 @@ export function useSensorStream(
 
     return () => {
       disposed = true;
+      Object.values(toastTimersRef.current).forEach((timerId) => {
+        window.clearTimeout(timerId);
+      });
+      toastTimersRef.current = {};
       client.removeAllListeners();
       client.end(true);
     };
@@ -375,9 +457,10 @@ export function useSensorStream(
         history,
         statuses,
         overallStatus: getHighestStatus(Object.values(statuses)),
+        door: doorByNode[config.id] ?? 'LOCKED',
       };
     });
-  }, [historiesByNode, thresholds]);
+  }, [historiesByNode, thresholds, doorByNode]);
 
   const sortedNodes = useMemo<SensorNodeState[]>(() => {
     return [...nodes].sort((a, b) => {
@@ -428,6 +511,10 @@ export function useSensorStream(
     setAlertLogs([]);
   }, []);
 
+  const clearAccessLogs = useCallback(() => {
+    setAccessLogs([]);
+  }, []);
+
   return {
     nodes,
     sortedNodes,
@@ -439,6 +526,10 @@ export function useSensorStream(
     overallStatus,
     alertLogs,
     clearAlertLogs,
+    accessLogs,
+    clearAccessLogs,
+    toasts,
+    dismissToast,
     isConnected,
     lastUpdatedAt,
     sampleCount,
