@@ -1,4 +1,5 @@
 import {
+  NodeHealthStatus,
   SensorKey,
   SensorMeta,
   SensorNodeConfig,
@@ -8,6 +9,9 @@ import {
 
 export const MQTT_BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
 export const MQTT_TOPIC = 'ikn/mut/+';
+
+export const NODE_OFFLINE_TIMEOUT_MS = 15000;
+export const OPERATOR_PIN = '1234';
 
 export const SENSOR_ORDER: SensorKey[] = ['mq4', 'mq135', 'temperature', 'humidity'];
 
@@ -52,6 +56,14 @@ export function formatNodeLocation(node: SensorNodeConfig): string {
 
 export function formatNodeLocationTag(node: SensorNodeConfig): string {
   return `${node.code} • ${formatNodeLocation(node)}`;
+}
+
+export function formatOfflineDuration(seconds: number | null): string {
+  if (seconds === null) return 'Menunggu sinyal';
+  if (seconds < 60) return `Offline • ${seconds} dtk lalu`;
+  const mins = Math.floor(seconds / 60);
+  const rem = seconds % 60;
+  return `Offline • ${mins}m ${rem}d lalu`;
 }
 
 export const SENSOR_METADATA: Record<SensorKey, SensorMeta> = {
@@ -132,6 +144,13 @@ export const MAX_HISTORY_POINTS = 20;
 export const MAX_ALERT_LOGS = 80;
 
 export const STATUS_PRIORITY: Record<SensorStatus, number> = {
+  normal: 1,
+  warning: 2,
+  danger: 3,
+};
+
+export const NODE_HEALTH_PRIORITY: Record<NodeHealthStatus, number> = {
+  offline: 0,
   normal: 1,
   warning: 2,
   danger: 3,

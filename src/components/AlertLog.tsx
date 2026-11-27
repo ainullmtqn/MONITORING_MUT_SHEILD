@@ -1,6 +1,7 @@
-import { ClipboardList, Trash2 } from 'lucide-react';
+import { ClipboardList, Download, Trash2 } from 'lucide-react';
 import { SENSOR_METADATA, formatSensorValue } from '../constants/sensors';
 import { AlertLogEntry } from '../types/sensor';
+import { buildCsvFilename, downloadCsv } from '../utils/csvExport';
 
 interface AlertLogProps {
   logs: AlertLogEntry[];
@@ -9,6 +10,33 @@ interface AlertLogProps {
 }
 
 export function AlertLog({ logs, onClearLogs, embedded = false }: AlertLogProps) {
+  const handleExportCsv = () => {
+    if (logs.length === 0) return;
+    downloadCsv(
+      buildCsvFilename('riwayat-peringatan-mut-ikn'),
+      [
+        'Timestamp',
+        'Node ID',
+        'Koordinat',
+        'Sensor',
+        'Nilai',
+        'Satuan',
+        'Ambang Batas',
+        'Status',
+      ],
+      logs.map((entry) => [
+        entry.timestamp,
+        entry.nodeCode,
+        entry.coordinatesText,
+        entry.sensorName,
+        entry.value,
+        entry.unit,
+        entry.thresholdValue,
+        entry.status === 'danger' ? 'BAHAYA' : 'WASPADA',
+      ])
+    );
+  };
+
   return (
     <section
       className={`flex flex-col min-h-0 flex-1 ${
@@ -29,15 +57,27 @@ export function AlertLog({ logs, onClearLogs, embedded = false }: AlertLogProps)
         </div>
 
         {logs.length > 0 && (
-          <button
-            type="button"
-            onClick={onClearLogs}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-[11px] text-[#64748B] hover:text-[#1E293B] transition-colors cursor-pointer"
-            title="Bersihkan log riwayat peringatan"
-          >
-            <Trash2 className="w-3 h-3" />
-            <span>Bersihkan</span>
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-[11px] text-[#1E293B] transition-colors cursor-pointer"
+              title="Ekspor riwayat peringatan ke CSV"
+            >
+              <Download className="w-3 h-3 text-[#64748B]" />
+              <span>Ekspor CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClearLogs}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-[11px] text-[#64748B] hover:text-[#1E293B] transition-colors cursor-pointer"
+              title="Bersihkan log riwayat peringatan (butuh PIN operator)"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Bersihkan</span>
+            </button>
+          </div>
         )}
       </div>
 

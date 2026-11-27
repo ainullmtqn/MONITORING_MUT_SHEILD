@@ -1,7 +1,7 @@
-import { SensorMeta, SensorStatus, SensorThreshold } from '../types/sensor';
+import { NodeHealthStatus, SensorMeta, SensorThreshold } from '../types/sensor';
 
 export const STATUS_STYLES: Record<
-  SensorStatus,
+  NodeHealthStatus,
   {
     label: string;
     badge: string;
@@ -31,13 +31,20 @@ export const STATUS_STYLES: Record<
     accentBorder: 'border-[#FECACA]',
     textColor: 'text-[#B91C1C]',
   },
+  offline: {
+    label: 'OFFLINE',
+    badge: 'bg-[#E2E5EA] text-[#334155] border-[#CBD5E1]',
+    barColor: 'bg-[#94A3B8]',
+    accentBorder: 'border-[#E2E5EA]',
+    textColor: 'text-[#475569]',
+  },
 };
 
 interface ThresholdGaugeBarProps {
   meta: SensorMeta;
   value: number;
   threshold: SensorThreshold;
-  status: SensorStatus;
+  status: NodeHealthStatus;
   size?: 'primary' | 'compact';
   showMaxUnit?: boolean;
 }

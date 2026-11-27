@@ -6,11 +6,14 @@ import {
   MAX_HISTORY_POINTS,
   MQTT_BROKER_URL,
   MQTT_TOPIC,
+  NODE_HEALTH_PRIORITY,
+  NODE_OFFLINE_TIMEOUT_MS,
   SENSOR_METADATA,
   SENSOR_NODES,
   SENSOR_ORDER,
   STATUS_PRIORITY,
   evaluateSensorStatus,
+  formatCoordinates,
   formatNodeLocationTag,
   formatTimestamp,
   getHighestStatus,
@@ -19,6 +22,7 @@ import {
   AlertLogEntry,
   DoorStatus,
   MqttSensorPayload,
+  NodeHealthStatus,
   PeakReadingsMap,
   RfidAccessLogEntry,
   RfidToastNotification,
@@ -79,17 +83,25 @@ function resolveTargetNode(
   );
 }
 
+function isNodeOnlineAt(lastUpdatedMs: number | null, nowMs: number): boolean {
+  return lastUpdatedMs !== null && nowMs - lastUpdatedMs <= NODE_OFFLINE_TIMEOUT_MS;
+}
+
 function buildPeakSnapshot(
   latestByNode: Record<string, TelemetryPoint>,
-  receivedNodeIds: Set<string>,
+  lastUpdatedByNode: Record<string, number | null>,
   timestamp: string,
   epochMs: number
 ): TelemetryPoint {
-  const activeNodes = SENSOR_NODES.filter((n) => receivedNodeIds.has(n.id));
-  const pool = activeNodes.length > 0 ? activeNodes : SENSOR_NODES;
+  const onlineNodes = SENSOR_NODES.filter((n) =>
+    isNodeOnlineAt(lastUpdatedByNode[n.id], epochMs)
+  );
+  const pool = onlineNodes.length > 0 ? onlineNodes : [SENSOR_NODES[0]];
   const firstNode = pool[0];
-  const firstPt = latestByNode[firstNode.id];
-  const firstTag = formatNodeLocationTag(firstNode);
+  const firstPt =
+    onlineNodes.length > 0 ? latestByNode[firstNode.id] : createEmptyPoint();
+  const firstTag =
+    onlineNodes.length > 0 ? formatNodeLocationTag(firstNode) : 'Tidak ada node online';
 
   const snapshot: TelemetryPoint = {
     mq4: firstPt.mq4,
@@ -133,12 +145,15 @@ function buildPeakSnapshot(
 export interface UseSensorStreamResult {
   nodes: SensorNodeState[];
   sortedNodes: SensorNodeState[];
+  onlineNodeCount: number;
   peakReadings: PeakReadingsMap;
   peakHistory: TelemetryPoint[];
   thresholds: ThresholdMap;
   updateThresholds: (next: ThresholdMap) => void;
   resetThresholds: () => void;
   overallStatus: SensorStatus;
+  isAlarmAcknowledged: boolean;
+  acknowledgeAlarm: () => void;
   alertLogs: AlertLogEntry[];
   clearAlertLogs: () => void;
   accessLogs: RfidAccessLogEntry[];
@@ -167,9 +182,18 @@ export function useSensorStream(
     );
   }, []);
 
+  const initialNullMap = useMemo(() => {
+    return Object.fromEntries(SENSOR_NODES.map((node) => [node.id, null]));
+  }, []);
+
   const [historiesByNode, setHistoriesByNode] =
     useState<Record<string, TelemetryPoint[]>>(initialHistories);
   const [doorByNode, setDoorByNode] = useState<Record<string, DoorStatus>>(initialDoors);
+  const [batteryByNode, setBatteryByNode] =
+    useState<Record<string, number | null>>(initialNullMap);
+  const [lastUpdatedByNode, setLastUpdatedByNode] =
+    useState<Record<string, number | null>>(initialNullMap);
+  const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [peakHistory, setPeakHistory] = useState<TelemetryPoint[]>([]);
   const [thresholds, setThresholds] = useState<ThresholdMap>(DEFAULT_THRESHOLDS);
   const [alertLogs, setAlertLogs] = useState<AlertLogEntry[]>([]);
@@ -178,7 +202,7 @@ export function useSensorStream(
   const [isConnected, setIsConnected] = useState<boolean>(false);
   const [sampleCount, setSampleCount] = useState<number>(0);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('--:--:--');
-  const [receivedIdsSnapshot, setReceivedIdsSnapshot] = useState<string[]>([]);
+  const [isAlarmAcknowledged, setIsAlarmAcknowledged] = useState<boolean>(false);
 
   const thresholdsRef = useRef<ThresholdMap>(thresholds);
   thresholdsRef.current = thresholds;
@@ -186,11 +210,15 @@ export function useSensorStream(
   const onAlertStatusRef = useRef(onAlertStatus);
   onAlertStatusRef.current = onAlertStatus;
 
+  const acknowledgedRef = useRef<boolean>(isAlarmAcknowledged);
+  acknowledgedRef.current = isAlarmAcknowledged;
+
   const receivedNodesRef = useRef<Set<string>>(new Set());
   const latestByNodeRef = useRef<Record<string, TelemetryPoint>>(
     Object.fromEntries(SENSOR_NODES.map((node) => [node.id, createEmptyPoint()]))
   );
-  const doorRef = useRef<Record<string, DoorStatus>>(initialDoors);
+  const lastUpdatedRef = useRef<Record<string, number | null>>({ ...initialNullMap });
+  const doorRef = useRef<Record<string, DoorStatus>>({ ...initialDoors });
   const toastTimersRef = useRef<Record<string, number>>({});
 
   const prevStatusRef = useRef<Record<string, Record<SensorKey, SensorStatus>>>(
@@ -208,6 +236,19 @@ export function useSensorStream(
       delete toastTimersRef.current[id];
     }
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const acknowledgeAlarm = useCallback(() => {
+    acknowledgedRef.current = true;
+    setIsAlarmAcknowledged(true);
+  }, []);
+
+  // 1-second heartbeat monitor to detect nodes offline > 15s
+  useEffect(() => {
+    const heartbeatTimer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(heartbeatTimer);
   }, []);
 
   useEffect(() => {
@@ -297,14 +338,29 @@ export function useSensorStream(
         payload.door,
         doorRef.current[targetNode.id] ?? 'LOCKED'
       );
+      const batteryPct = toValidNumber(payload.battery, 0, 100);
+      const roundedBattery = batteryPct !== null ? Math.round(batteryPct) : null;
       const isRfidTap = payload.rfid === true;
 
       doorRef.current[targetNode.id] = currentDoor;
+      lastUpdatedRef.current[targetNode.id] = epochMs;
+
       setDoorByNode((prev) =>
         prev[targetNode.id] === currentDoor
           ? prev
           : { ...prev, [targetNode.id]: currentDoor }
       );
+      if (roundedBattery !== null) {
+        setBatteryByNode((prev) => ({
+          ...prev,
+          [targetNode.id]: roundedBattery,
+        }));
+      }
+      setLastUpdatedByNode((prev) => ({
+        ...prev,
+        [targetNode.id]: epochMs,
+      }));
+      setNowMs(epochMs);
 
       const point: TelemetryPoint = {
         mq4,
@@ -316,13 +372,13 @@ export function useSensorStream(
         jarak: typeof payload.jarak === 'number' ? payload.jarak : undefined,
         rfid: isRfidTap,
         door: currentDoor,
+        battery: roundedBattery ?? undefined,
         deviceStatus: typeof payload.status === 'string' ? payload.status : undefined,
       };
 
       const isFirstForNode = !receivedNodesRef.current.has(targetNode.id);
       if (isFirstForNode) {
         receivedNodesRef.current.add(targetNode.id);
-        setReceivedIdsSnapshot(Array.from(receivedNodesRef.current));
       }
 
       latestByNodeRef.current[targetNode.id] = point;
@@ -344,7 +400,7 @@ export function useSensorStream(
 
       const peakSnapshot = buildPeakSnapshot(
         latestByNodeRef.current,
-        receivedNodesRef.current,
+        lastUpdatedRef.current,
         timestamp,
         epochMs
       );
@@ -352,6 +408,9 @@ export function useSensorStream(
         ...prev.slice(-(MAX_HISTORY_POINTS - 1)),
         peakSnapshot,
       ]);
+
+      const coordinatesText = formatCoordinates(targetNode);
+      const locationTag = formatNodeLocationTag(targetNode);
 
       if (isRfidTap) {
         const granted = currentDoor === 'OPEN';
@@ -361,7 +420,8 @@ export function useSensorStream(
           nodeId: targetNode.id,
           nodeCode: targetNode.code,
           nodeName: targetNode.name,
-          nodeLocationTag: formatNodeLocationTag(targetNode),
+          nodeLocationTag: locationTag,
+          coordinatesText,
           door: currentDoor,
           accessResult: granted ? 'DITERIMA' : 'DITOLAK',
           mq4Value: mq4,
@@ -386,6 +446,7 @@ export function useSensorStream(
 
       const newEntries: AlertLogEntry[] = [];
       let highestStatus: SensorStatus = 'normal';
+      let hasNewSpikeOrEscalation = false;
 
       for (const key of SENSOR_ORDER) {
         const val = point[key];
@@ -397,6 +458,13 @@ export function useSensorStream(
         }
 
         const prevStatus = prevStatusRef.current[targetNode.id][key];
+        if (
+          status !== 'normal' &&
+          STATUS_PRIORITY[status] > STATUS_PRIORITY[prevStatus]
+        ) {
+          hasNewSpikeOrEscalation = true;
+        }
+
         const shouldLog =
           status !== 'normal' && (prevStatus !== status || status === 'danger');
 
@@ -408,7 +476,8 @@ export function useSensorStream(
             nodeId: targetNode.id,
             nodeCode: targetNode.code,
             nodeName: targetNode.name,
-            nodeLocationTag: formatNodeLocationTag(targetNode),
+            nodeLocationTag: locationTag,
+            coordinatesText,
             sensorKey: key,
             sensorName: meta.label,
             value: val,
@@ -425,7 +494,13 @@ export function useSensorStream(
         setAlertLogs((prev) => [...newEntries, ...prev].slice(0, MAX_ALERT_LOGS));
       }
 
-      if (highestStatus !== 'normal') {
+      // Re-arm alarm if a fresh excursion or escalation occurs
+      if (hasNewSpikeOrEscalation && acknowledgedRef.current) {
+        acknowledgedRef.current = false;
+        setIsAlarmAcknowledged(false);
+      }
+
+      if (highestStatus !== 'normal' && !acknowledgedRef.current) {
         onAlertStatusRef.current?.(highestStatus);
       }
     });
@@ -445,27 +520,41 @@ export function useSensorStream(
     return SENSOR_NODES.map((config) => {
       const history = historiesByNode[config.id] ?? [createEmptyPoint()];
       const latest = history[history.length - 1];
+      const lastMs = lastUpdatedByNode[config.id];
+      const isOnline = isNodeOnlineAt(lastMs, nowMs);
+      const secondsSinceUpdate =
+        lastMs !== null ? Math.max(0, Math.floor((nowMs - lastMs) / 1000)) : null;
+
       const statuses: Record<SensorKey, SensorStatus> = {
         mq4: evaluateSensorStatus(latest.mq4, thresholds.mq4),
         mq135: evaluateSensorStatus(latest.mq135, thresholds.mq135),
         temperature: evaluateSensorStatus(latest.temperature, thresholds.temperature),
         humidity: evaluateSensorStatus(latest.humidity, thresholds.humidity),
       };
+
+      const overallStatus: NodeHealthStatus = isOnline
+        ? getHighestStatus(Object.values(statuses))
+        : 'offline';
+
       return {
         config,
         latest,
         history,
         statuses,
-        overallStatus: getHighestStatus(Object.values(statuses)),
+        overallStatus,
+        isOnline,
+        lastUpdatedMs: lastMs,
+        secondsSinceUpdate,
+        battery: batteryByNode[config.id] ?? null,
         door: doorByNode[config.id] ?? 'LOCKED',
       };
     });
-  }, [historiesByNode, thresholds, doorByNode]);
+  }, [historiesByNode, thresholds, doorByNode, batteryByNode, lastUpdatedByNode, nowMs]);
 
   const sortedNodes = useMemo<SensorNodeState[]>(() => {
     return [...nodes].sort((a, b) => {
       const priorityDiff =
-        STATUS_PRIORITY[b.overallStatus] - STATUS_PRIORITY[a.overallStatus];
+        NODE_HEALTH_PRIORITY[b.overallStatus] - NODE_HEALTH_PRIORITY[a.overallStatus];
       if (priorityDiff !== 0) return priorityDiff;
       const mq4Diff = b.latest.mq4 - a.latest.mq4;
       if (mq4Diff !== 0) return mq4Diff;
@@ -473,17 +562,32 @@ export function useSensorStream(
     });
   }, [nodes]);
 
+  const onlineNodes = useMemo(
+    () => nodes.filter((n) => n.isOnline),
+    [nodes]
+  );
+
+  // Exclude offline nodes from peak calculation so stale readings never pollute worst-case display
   const peakReadings = useMemo<PeakReadingsMap>(() => {
-    const receivedSet = new Set(receivedIdsSnapshot);
-    const activePool = nodes.filter((n) => receivedSet.has(n.config.id));
-    const pool = activePool.length > 0 ? activePool : nodes;
+    const emptyFallback = createEmptyPoint();
+    if (onlineNodes.length === 0) {
+      const result = {} as PeakReadingsMap;
+      for (const key of SENSOR_ORDER) {
+        result[key] = {
+          value: emptyFallback[key],
+          status: 'normal',
+          sourceNode: SENSOR_NODES[0],
+        };
+      }
+      return result;
+    }
 
     const result = {} as PeakReadingsMap;
     for (const key of SENSOR_ORDER) {
-      let bestNode = pool[0];
-      for (let i = 1; i < pool.length; i++) {
-        if (pool[i].latest[key] > bestNode.latest[key]) {
-          bestNode = pool[i];
+      let bestNode = onlineNodes[0];
+      for (let i = 1; i < onlineNodes.length; i++) {
+        if (onlineNodes[i].latest[key] > bestNode.latest[key]) {
+          bestNode = onlineNodes[i];
         }
       }
       result[key] = {
@@ -493,11 +597,22 @@ export function useSensorStream(
       };
     }
     return result;
-  }, [nodes, receivedIdsSnapshot]);
+  }, [onlineNodes]);
 
   const overallStatus = useMemo<SensorStatus>(() => {
-    return getHighestStatus(nodes.map((n) => n.overallStatus));
-  }, [nodes]);
+    const onlineStatuses = onlineNodes
+      .map((n) => n.overallStatus)
+      .filter((s): s is SensorStatus => s !== 'offline');
+    return getHighestStatus(onlineStatuses);
+  }, [onlineNodes]);
+
+  // Auto-reset alarm acknowledgement once all online nodes return to NORMAL
+  useEffect(() => {
+    if (overallStatus === 'normal' && isAlarmAcknowledged) {
+      acknowledgedRef.current = false;
+      setIsAlarmAcknowledged(false);
+    }
+  }, [overallStatus, isAlarmAcknowledged]);
 
   const updateThresholds = useCallback((next: ThresholdMap) => {
     setThresholds(next);
@@ -518,12 +633,15 @@ export function useSensorStream(
   return {
     nodes,
     sortedNodes,
+    onlineNodeCount: onlineNodes.length,
     peakReadings,
     peakHistory,
     thresholds,
     updateThresholds,
     resetThresholds,
     overallStatus,
+    isAlarmAcknowledged,
+    acknowledgeAlarm,
     alertLogs,
     clearAlertLogs,
     accessLogs,

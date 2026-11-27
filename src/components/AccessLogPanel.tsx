@@ -1,6 +1,7 @@
-import { KeyRound, Trash2 } from 'lucide-react';
+import { Download, KeyRound, Trash2 } from 'lucide-react';
 import { formatSensorValue } from '../constants/sensors';
 import { RfidAccessLogEntry } from '../types/sensor';
+import { buildCsvFilename, downloadCsv } from '../utils/csvExport';
 
 interface AccessLogPanelProps {
   logs: RfidAccessLogEntry[];
@@ -13,6 +14,31 @@ export function AccessLogPanel({
   onClearLogs,
   embedded = false,
 }: AccessLogPanelProps) {
+  const handleExportCsv = () => {
+    if (logs.length === 0) return;
+    downloadCsv(
+      buildCsvFilename('log-akses-rfid-mut-ikn'),
+      [
+        'Timestamp',
+        'Node ID',
+        'Koordinat',
+        'Event',
+        'Nilai MQ-4 (ppm)',
+        'Status Pintu',
+        'Status Akses',
+      ],
+      logs.map((entry) => [
+        entry.timestamp,
+        entry.nodeCode,
+        entry.coordinatesText,
+        'Tap Kartu RFID',
+        entry.mq4Value,
+        entry.door,
+        entry.accessResult,
+      ])
+    );
+  };
+
   return (
     <section
       className={`flex flex-col min-h-0 flex-1 ${
@@ -33,15 +59,27 @@ export function AccessLogPanel({
         </div>
 
         {logs.length > 0 && (
-          <button
-            type="button"
-            onClick={onClearLogs}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-[11px] text-[#64748B] hover:text-[#1E293B] transition-colors cursor-pointer"
-            title="Bersihkan log akses RFID"
-          >
-            <Trash2 className="w-3 h-3" />
-            <span>Bersihkan</span>
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              type="button"
+              onClick={handleExportCsv}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-[11px] text-[#1E293B] transition-colors cursor-pointer"
+              title="Ekspor log akses RFID ke CSV"
+            >
+              <Download className="w-3 h-3 text-[#64748B]" />
+              <span>Ekspor CSV</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={onClearLogs}
+              className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-[11px] text-[#64748B] hover:text-[#1E293B] transition-colors cursor-pointer"
+              title="Bersihkan log akses RFID (butuh PIN operator)"
+            >
+              <Trash2 className="w-3 h-3" />
+              <span>Bersihkan</span>
+            </button>
+          </div>
         )}
       </div>
 

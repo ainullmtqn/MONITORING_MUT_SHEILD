@@ -1,4 +1,4 @@
-import { AlertOctagon, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, BellOff, CheckCircle2 } from 'lucide-react';
 import {
   SENSOR_METADATA,
   SENSOR_ORDER,
@@ -10,6 +10,8 @@ import { SensorKey, SensorNodeState, SensorStatus } from '../types/sensor';
 interface AlertBannerProps {
   nodes: SensorNodeState[];
   overallStatus: SensorStatus;
+  isAlarmAcknowledged: boolean;
+  onAcknowledgeAlarm: () => void;
 }
 
 interface TriggeredItem {
@@ -19,7 +21,14 @@ interface TriggeredItem {
   status: Exclude<SensorStatus, 'normal'>;
 }
 
-export function AlertBanner({ nodes, overallStatus }: AlertBannerProps) {
+export function AlertBanner({
+  nodes,
+  overallStatus,
+  isAlarmAcknowledged,
+  onAcknowledgeAlarm,
+}: AlertBannerProps) {
+  const onlineNodes = nodes.filter((n) => n.isOnline);
+
   if (overallStatus === 'normal') {
     return (
       <div
@@ -29,18 +38,27 @@ export function AlertBanner({ nodes, overallStatus }: AlertBannerProps) {
         <div className="flex items-center gap-2.5 min-w-0">
           <CheckCircle2 className="w-4 h-4 text-[#15803D] shrink-0" />
           <p className="text-xs sm:text-sm text-[#15803D] truncate">
-            <span className="font-semibold">STATUS NORMAL:</span> Seluruh {nodes.length} titik terowongan MUT IKN berada di bawah ambang batas waspada.
+            {onlineNodes.length > 0 ? (
+              <>
+                <span className="font-semibold">STATUS NORMAL:</span> Seluruh{' '}
+                {onlineNodes.length} titik online di MUT IKN berada di bawah ambang batas waspada.
+              </>
+            ) : (
+              <>
+                <span className="font-semibold">STANDBY:</span> Menunggu paket telemetri MQTT dari node terowongan MUT IKN (`ikn/mut/+`).
+              </>
+            )}
           </p>
         </div>
         <span className="hidden sm:inline-block text-[11px] font-mono-tabular text-[#15803D] shrink-0">
-          TIDAK ADA TINDAKAN DIPERLUKAN
+          {onlineNodes.length}/{nodes.length} NODE ONLINE
         </span>
       </div>
     );
   }
 
   const triggeredItems: TriggeredItem[] = [];
-  for (const node of nodes) {
+  for (const node of onlineNodes) {
     for (const key of SENSOR_ORDER) {
       const st = node.statuses[key];
       if (st !== 'normal') {
@@ -53,6 +71,8 @@ export function AlertBanner({ nodes, overallStatus }: AlertBannerProps) {
       }
     }
   }
+
+  if (triggeredItems.length === 0) return null;
 
   triggeredItems.sort((a, b) => {
     if (a.status !== b.status) return a.status === 'danger' ? -1 : 1;
@@ -110,15 +130,41 @@ export function AlertBanner({ nodes, overallStatus }: AlertBannerProps) {
         </div>
       </div>
 
-      <span
-        className={`self-start sm:self-center text-[11px] font-mono-tabular font-semibold px-2 py-0.5 rounded border shrink-0 ${
-          isDanger
-            ? 'bg-white border-[#FECACA] text-[#B91C1C]'
-            : 'bg-white border-[#FDE68A] text-[#B45309]'
-        }`}
-      >
-        {affectedNodesCount} TITIK TERPICU
-      </span>
+      <div className="flex items-center gap-2 self-start sm:self-center shrink-0">
+        <span
+          className={`text-[11px] font-mono-tabular font-semibold px-2 py-0.5 rounded border ${
+            isDanger
+              ? 'bg-white border-[#FECACA] text-[#B91C1C]'
+              : 'bg-white border-[#FDE68A] text-[#B45309]'
+          }`}
+        >
+          {affectedNodesCount} TITIK TERPICU
+        </span>
+
+        {isAlarmAcknowledged ? (
+          <span
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-[#CBD5E1] bg-white text-[#475569] text-[11px] font-medium"
+            title="Suara alarm dibungkam sementara hingga kondisi normal atau muncul lonjakan baru"
+          >
+            <BellOff className="w-3 h-3" />
+            <span>Terkonfirmasi (Senyap)</span>
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={onAcknowledgeAlarm}
+            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded border text-[11px] font-semibold transition-colors cursor-pointer ${
+              isDanger
+                ? 'bg-[#B91C1C] border-[#991B1B] text-white hover:bg-[#991B1B]'
+                : 'bg-[#B45309] border-[#92400E] text-white hover:bg-[#92400E]'
+            }`}
+            title="Konfirmasi alarm dan bungkam suara sementara"
+          >
+            <BellOff className="w-3 h-3" />
+            <span>Konfirmasi (Mute)</span>
+          </button>
+        )}
+      </div>
     </div>
   );
 }

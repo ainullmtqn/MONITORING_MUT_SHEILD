@@ -1,12 +1,24 @@
-import { Activity, MapPin, SlidersHorizontal, Volume2, VolumeX } from 'lucide-react';
-import { formatCoordinates } from '../constants/sensors';
-import { DoorStatus, SensorNodeConfig } from '../types/sensor';
+import { useEffect, useState } from 'react';
+import {
+  Activity,
+  Lock,
+  MapPin,
+  Maximize2,
+  Minimize2,
+  ShieldCheck,
+  SlidersHorizontal,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
+import { formatCoordinates, formatOfflineDuration } from '../constants/sensors';
+import { SensorNodeConfig, SensorNodeState } from '../types/sensor';
 import { DoorBadge } from './DoorBadge';
 
 interface HeaderProps {
   nodes: SensorNodeConfig[];
   selectedNodeId: string;
-  selectedNodeDoor?: DoorStatus;
+  selectedNodeState?: SensorNodeState | null;
+  onlineNodeCount: number;
   onSelectNode: (nodeId: string) => void;
   isConnected: boolean;
   lastUpdatedAt: string;
@@ -14,12 +26,15 @@ interface HeaderProps {
   isAudioEnabled: boolean;
   onToggleAudio: () => void;
   onOpenThresholdModal: () => void;
+  isOperatorUnlocked: boolean;
+  onLockOperator: () => void;
 }
 
 export function Header({
   nodes,
   selectedNodeId,
-  selectedNodeDoor,
+  selectedNodeState,
+  onlineNodeCount,
   onSelectNode,
   isConnected,
   lastUpdatedAt,
@@ -27,12 +42,37 @@ export function Header({
   isAudioEnabled,
   onToggleAudio,
   onOpenThresholdModal,
+  isOperatorUnlocked,
+  onLockOperator,
 }: HeaderProps) {
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
+  useEffect(() => {
+    const handleFsChange = () => {
+      setIsFullscreen(Boolean(document.fullscreenElement));
+    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFsChange);
+    };
+  }, []);
+
+  const toggleFullscreen = async () => {
+    try {
+      if (!document.fullscreenElement) {
+        await document.documentElement.requestFullscreen();
+      } else {
+        await document.exitFullscreen();
+      }
+    } catch {
+      // Ignore if browser restricts fullscreen API
+    }
+  };
+
   return (
-    <header className="bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-4 py-2.5 flex flex-col gap-2 shrink-0">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <header className="bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-4 py-2 flex flex-col gap-2 shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-2.5">
         <div className="flex items-center gap-3 min-w-0">
           <div className="w-8 h-8 rounded bg-[#F4F5F7] border border-[#E2E5EA] flex items-center justify-center text-[#1E293B] shrink-0">
             <Activity className="w-4 h-4" />
@@ -42,12 +82,28 @@ export function Header({
               Dashboard Monitoring Gas MUT IKN
             </h1>
             <p className="text-[11px] text-[#64748B] font-mono-tabular truncate">
-              UNIT: MUT-IKN-SUBSURFACE • MQ-4 / MQ-135 / DHT11 • {nodes.length} TITIK AKTIF • SAMPEL #{sampleCount}
+              SCADA: MUT-IKN-SUBSURFACE • {onlineNodeCount}/{nodes.length} TITIK ONLINE • SAMPEL #{sampleCount}
             </p>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          {isOperatorUnlocked && (
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-[#BBF7D0] bg-[#F0FDF4] text-[11px] font-medium text-[#15803D]">
+              <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+              <span>Mode Operator: Aktif</span>
+              <button
+                type="button"
+                onClick={onLockOperator}
+                className="ml-1 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-white border border-[#BBF7D0] hover:bg-[#DCFCE7] text-[10px] font-semibold text-[#15803D] cursor-pointer"
+                title="Kunci kembali akses operator"
+              >
+                <Lock className="w-2.5 h-2.5" />
+                <span>Kunci</span>
+              </button>
+            </div>
+          )}
+
           <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded border border-[#E2E5EA] bg-[#F4F5F7]/60 text-xs text-[#1E293B]">
             <MapPin className="w-3.5 h-3.5 text-[#64748B] shrink-0" />
             <span className="sr-only">Pilih titik sensor MUT IKN</span>
@@ -67,7 +123,7 @@ export function Header({
           </label>
 
           <div
-            className={`flex items-center gap-2 px-2.5 py-1.5 rounded border text-xs font-mono-tabular ${
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-mono-tabular ${
               isConnected
                 ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]'
                 : 'bg-[#FEF2F2] border-[#FECACA] text-[#B91C1C]'
@@ -89,7 +145,7 @@ export function Header({
           <button
             type="button"
             onClick={onToggleAudio}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-medium transition-colors cursor-pointer ${
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border text-xs font-medium transition-colors cursor-pointer ${
               isAudioEnabled
                 ? 'bg-white border-[#E2E5EA] text-[#1E293B] hover:bg-[#F8FAFC]'
                 : 'bg-[#F4F5F7] border-[#E2E5EA] text-[#64748B] hover:bg-[#E2E5EA]/60'
@@ -108,16 +164,42 @@ export function Header({
           <button
             type="button"
             onClick={onOpenThresholdModal}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-xs font-medium text-[#1E293B] transition-colors cursor-pointer"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-xs font-medium text-[#1E293B] transition-colors cursor-pointer"
+            title={
+              isOperatorUnlocked
+                ? 'Buka pengaturan ambang batas'
+                : 'Pengaturan ambang batas (terkunci PIN operator)'
+            }
           >
+            {!isOperatorUnlocked && (
+              <Lock className="w-3 h-3 text-[#64748B]" />
+            )}
             <SlidersHorizontal className="w-3.5 h-3.5 text-[#64748B]" />
             <span>Ambang Batas</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void toggleFullscreen()}
+            className="inline-flex items-center justify-center p-1.5 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-[#64748B] hover:text-[#1E293B] transition-colors cursor-pointer"
+            title={
+              isFullscreen
+                ? 'Keluar dari mode layar penuh'
+                : 'Mode Layar Penuh (Control Room)'
+            }
+            aria-label={isFullscreen ? 'Keluar layar penuh' : 'Mode layar penuh'}
+          >
+            {isFullscreen ? (
+              <Minimize2 className="w-4 h-4" />
+            ) : (
+              <Maximize2 className="w-4 h-4" />
+            )}
           </button>
         </div>
       </div>
 
-      {selectedNode && (
-        <div className="pt-2 border-t border-[#E2E5EA] flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono-tabular">
+      {selectedNode && selectedNodeState && (
+        <div className="pt-1.5 border-t border-[#E2E5EA] flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono-tabular">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[#64748B]">
             <span className="inline-flex items-center gap-1 text-[#1E293B] font-semibold">
               <MapPin className="w-3 h-3 text-[#2563EB]" />
@@ -129,10 +211,13 @@ export function Header({
             <span>
               Kedalaman: <strong className="text-[#1E293B]">{selectedNode.depth}</strong>
             </span>
-            {selectedNodeDoor && (
-              <span className="inline-flex items-center gap-1.5">
-                <span>Pintu:</span>
-                <DoorBadge door={selectedNodeDoor} />
+            <span className="inline-flex items-center gap-1.5">
+              <span>Pintu:</span>
+              <DoorBadge door={selectedNodeState.door} />
+            </span>
+            {!selectedNodeState.isOnline && (
+              <span className="px-1.5 py-0.5 rounded border border-[#CBD5E1] bg-[#E2E5EA] text-[#334155] font-semibold">
+                {formatOfflineDuration(selectedNodeState.secondsSinceUpdate)}
               </span>
             )}
           </div>
