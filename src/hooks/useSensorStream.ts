@@ -174,6 +174,7 @@ export interface UseSensorStreamResult {
   lastUpdatedAt: string;
   sampleCount: number;
   supabaseSync: SupabaseSyncState;
+  recheckSupabase: () => void;
 }
 
 const SUPABASE_TELEMETRY_SYNC_INTERVAL_MS = 10000;
@@ -262,11 +263,12 @@ export function useSensorStream(
     setIsAlarmAcknowledged(true);
   }, []);
 
-  // Load initial historical alerts / RFID logs from Supabase on mount
-  useEffect(() => {
-    let active = true;
+  const runSupabaseCheck = useCallback(() => {
+    setSupabaseSync({
+      status: 'checking',
+      message: 'Memeriksa koneksi database Supabase...',
+    });
     void checkAndLoadSupabaseInitialData().then((res) => {
-      if (!active) return;
       setSupabaseSync(res.syncState);
       if (res.alerts.length > 0) {
         setAlertLogs((prev) =>
@@ -275,14 +277,18 @@ export function useSensorStream(
       }
       if (res.accessLogs.length > 0) {
         setAccessLogs((prev) =>
-          prev.length === 0 ? res.accessLogs : [...prev, ...res.accessLogs].slice(0, MAX_ALERT_LOGS)
+          prev.length === 0
+            ? res.accessLogs
+            : [...prev, ...res.accessLogs].slice(0, MAX_ALERT_LOGS)
         );
       }
     });
-    return () => {
-      active = false;
-    };
   }, []);
+
+  // Load initial historical alerts / RFID logs from Supabase on mount
+  useEffect(() => {
+    runSupabaseCheck();
+  }, [runSupabaseCheck]);
 
   // 1-second heartbeat monitor to detect nodes offline > 15s
   useEffect(() => {
@@ -716,5 +722,6 @@ export function useSensorStream(
     lastUpdatedAt,
     sampleCount,
     supabaseSync,
+    recheckSupabase: runSupabaseCheck,
   };
 }

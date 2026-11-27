@@ -30,12 +30,13 @@ function mapSupabaseError(error: { code?: string; message?: string }): SupabaseS
   if (error.code === '42501') {
     return {
       status: 'rls-restricted',
-      message: 'Tabel ditemukan, akses anon dibatasi RLS (42501)',
+      message: 'Tabel ditemukan, akses anon dibatasi RLS/GRANT (42501)',
     };
   }
+  const detail = error.code ? `[${error.code}] ${error.message ?? ''}` : error.message;
   return {
     status: 'error',
-    message: error.message || 'Gagal terhubung ke Supabase',
+    message: detail || 'Gagal terhubung ke Supabase',
   };
 }
 
@@ -47,16 +48,8 @@ export async function checkAndLoadSupabaseInitialData(): Promise<{
 }> {
   try {
     const [alertsRes, rfidRes, settingsRes] = await Promise.all([
-      supabase
-        .from('alert_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(40),
-      supabase
-        .from('rfid_logs')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(40),
+      supabase.from('alert_logs').select('*').limit(40),
+      supabase.from('rfid_logs').select('*').limit(40),
       supabase.from('settings').select('*').limit(10),
     ]);
 

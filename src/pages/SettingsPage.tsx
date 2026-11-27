@@ -32,6 +32,7 @@ export function SettingsPage() {
     onlineNodeCount,
     sampleCount,
     supabaseSync,
+    recheckSupabase,
   } = useMonitoring();
 
   const [draft, setDraft] = useState<ThresholdMap>(thresholds);
@@ -308,8 +309,17 @@ export function SettingsPage() {
                   {onlineNodeCount}/{SENSOR_NODES.length} aktif • #{sampleCount}
                 </dd>
               </div>
-              <div className="px-3 py-2 flex items-center justify-between gap-2">
-                <dt className="text-[#64748B]">Database Supabase</dt>
+              <div className="px-3 py-2 flex items-start justify-between gap-2">
+                <div>
+                  <dt className="text-[#64748B]">Database Supabase</dt>
+                  <button
+                    type="button"
+                    onClick={recheckSupabase}
+                    className="mt-1 px-2 py-0.5 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-[10px] font-medium text-[#1E293B] cursor-pointer"
+                  >
+                    Uji Koneksi Ulang
+                  </button>
+                </div>
                 <dd className="font-mono-tabular text-right">
                   <span
                     className={`font-semibold ${
@@ -329,7 +339,7 @@ export function SettingsPage() {
                           ? 'MEMERIKSA...'
                           : 'TERPUTUS'}
                   </span>
-                  <span className="block text-[10px] text-[#64748B]">
+                  <span className="block text-[10px] text-[#64748B] max-w-[230px] break-words">
                     {supabaseSync.message}
                   </span>
                 </dd>
