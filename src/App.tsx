@@ -3,7 +3,7 @@ import { AlertBanner } from './components/AlertBanner';
 import { Header } from './components/Header';
 import { RfidToastContainer } from './components/RfidToastContainer';
 import { Sidebar } from './components/Sidebar';
-import { MonitoringProvider, useMonitoring } from './context/MonitoringContext';
+import { SensorProvider, useSensorContext } from './context/SensorContext';
 import { LogsPage } from './pages/LogsPage';
 import { MapAndNodesPage } from './pages/MapAndNodesPage';
 import { MonitoringPage } from './pages/MonitoringPage';
@@ -20,7 +20,7 @@ function DashboardShell() {
     acknowledgeAlarm,
     toasts,
     dismissToast,
-  } = useMonitoring();
+  } = useSensorContext();
 
   return (
     <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#F4F5F7] text-[#1E293B] flex">
@@ -54,9 +54,9 @@ function DashboardShell() {
 
 export function App() {
   return (
-    <MonitoringProvider>
+    <SensorProvider>
       <DashboardShell />
-    </MonitoringProvider>
+    </SensorProvider>
   );
 }
 

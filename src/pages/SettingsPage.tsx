@@ -31,6 +31,7 @@ export function SettingsPage() {
     connectionState,
     onlineNodeCount,
     sampleCount,
+    supabaseSync,
   } = useMonitoring();
 
   const [draft, setDraft] = useState<ThresholdMap>(thresholds);
@@ -305,6 +306,32 @@ export function SettingsPage() {
                 <dt className="text-[#64748B]">Node Online / Sampel</dt>
                 <dd className="font-mono-tabular font-semibold text-[#1E293B]">
                   {onlineNodeCount}/{SENSOR_NODES.length} aktif • #{sampleCount}
+                </dd>
+              </div>
+              <div className="px-3 py-2 flex items-center justify-between gap-2">
+                <dt className="text-[#64748B]">Database Supabase</dt>
+                <dd className="font-mono-tabular text-right">
+                  <span
+                    className={`font-semibold ${
+                      supabaseSync.status === 'connected'
+                        ? 'text-[#15803D]'
+                        : supabaseSync.status === 'rls-restricted' ||
+                            supabaseSync.status === 'checking'
+                          ? 'text-[#B45309]'
+                          : 'text-[#B91C1C]'
+                    }`}
+                  >
+                    {supabaseSync.status === 'connected'
+                      ? 'TERHUBUNG'
+                      : supabaseSync.status === 'rls-restricted'
+                        ? 'RLS TERBATAS'
+                        : supabaseSync.status === 'checking'
+                          ? 'MEMERIKSA...'
+                          : 'TERPUTUS'}
+                  </span>
+                  <span className="block text-[10px] text-[#64748B]">
+                    {supabaseSync.message}
+                  </span>
                 </dd>
               </div>
             </dl>

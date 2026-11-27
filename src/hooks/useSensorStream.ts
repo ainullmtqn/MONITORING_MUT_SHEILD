@@ -19,6 +19,14 @@ import {
   getHighestStatus,
 } from '../constants/sensors';
 import {
+  SupabaseSyncState,
+  checkAndLoadSupabaseInitialData,
+  insertAlertLogToSupabase,
+  insertRfidLogToSupabase,
+  insertSensorLogToSupabase,
+  saveThresholdsToSupabase,
+} from '../services/supabaseSync';
+import {
   AlertLogEntry,
   DoorStatus,
   MqttConnectionState,
@@ -165,7 +173,10 @@ export interface UseSensorStreamResult {
   isConnected: boolean;
   lastUpdatedAt: string;
   sampleCount: number;
+  supabaseSync: SupabaseSyncState;
 }
+
+const SUPABASE_TELEMETRY_SYNC_INTERVAL_MS = 10000;
 
 export function useSensorStream(
   onAlertStatus?: (status: SensorStatus) => void
@@ -206,6 +217,10 @@ export function useSensorStream(
   const [sampleCount, setSampleCount] = useState<number>(0);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('--:--:--');
   const [isAlarmAcknowledged, setIsAlarmAcknowledged] = useState<boolean>(false);
+  const [supabaseSync, setSupabaseSync] = useState<SupabaseSyncState>({
+    status: 'checking',
+    message: 'Memeriksa koneksi database Supabase...',
+  });
 
   const thresholdsRef = useRef<ThresholdMap>(thresholds);
   thresholdsRef.current = thresholds;
@@ -221,6 +236,7 @@ export function useSensorStream(
     Object.fromEntries(SENSOR_NODES.map((node) => [node.id, createEmptyPoint()]))
   );
   const lastUpdatedRef = useRef<Record<string, number | null>>({ ...initialNullMap });
+  const lastSupabaseLogRef = useRef<Record<string, number>>({});
   const doorRef = useRef<Record<string, DoorStatus>>({ ...initialDoors });
   const toastTimersRef = useRef<Record<string, number>>({});
 
@@ -244,6 +260,28 @@ export function useSensorStream(
   const acknowledgeAlarm = useCallback(() => {
     acknowledgedRef.current = true;
     setIsAlarmAcknowledged(true);
+  }, []);
+
+  // Load initial historical alerts / RFID logs from Supabase on mount
+  useEffect(() => {
+    let active = true;
+    void checkAndLoadSupabaseInitialData().then((res) => {
+      if (!active) return;
+      setSupabaseSync(res.syncState);
+      if (res.alerts.length > 0) {
+        setAlertLogs((prev) =>
+          prev.length === 0 ? res.alerts : [...prev, ...res.alerts].slice(0, MAX_ALERT_LOGS)
+        );
+      }
+      if (res.accessLogs.length > 0) {
+        setAccessLogs((prev) =>
+          prev.length === 0 ? res.accessLogs : [...prev, ...res.accessLogs].slice(0, MAX_ALERT_LOGS)
+        );
+      }
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
   // 1-second heartbeat monitor to detect nodes offline > 15s
@@ -430,6 +468,7 @@ export function useSensorStream(
           mq4Value: mq4,
         };
         setAccessLogs((prev) => [accessEntry, ...prev].slice(0, MAX_ALERT_LOGS));
+        void insertRfidLogToSupabase(accessEntry);
 
         const toastId = `toast-${epochMs}-${targetNode.id}-${Math.random().toString(36).slice(2, 6)}`;
         const toast: RfidToastNotification = {
@@ -473,7 +512,7 @@ export function useSensorStream(
 
         if (shouldLog) {
           const meta = SENSOR_METADATA[key];
-          newEntries.push({
+          const entry: AlertLogEntry = {
             id: `${epochMs}-${targetNode.id}-${key}-${Math.random().toString(36).slice(2, 6)}`,
             timestamp,
             nodeId: targetNode.id,
@@ -487,7 +526,9 @@ export function useSensorStream(
             unit: meta.unit,
             thresholdValue: status === 'danger' ? th.danger : th.warning,
             status,
-          });
+          };
+          newEntries.push(entry);
+          void insertAlertLogToSupabase(entry);
         }
 
         prevStatusRef.current[targetNode.id][key] = status;
@@ -497,7 +538,22 @@ export function useSensorStream(
         setAlertLogs((prev) => [...newEntries, ...prev].slice(0, MAX_ALERT_LOGS));
       }
 
-      // Re-arm alarm if a fresh excursion or escalation occurs
+      // Throttled Supabase sensor_logs sync (every 10s per node or on alert)
+      const lastLoggedAt = lastSupabaseLogRef.current[targetNode.id] ?? 0;
+      if (
+        hasNewSpikeOrEscalation ||
+        epochMs - lastLoggedAt >= SUPABASE_TELEMETRY_SYNC_INTERVAL_MS
+      ) {
+        lastSupabaseLogRef.current[targetNode.id] = epochMs;
+        void insertSensorLogToSupabase(targetNode, point, highestStatus).then(
+          (res) => {
+            if (res && !disposed) {
+              setSupabaseSync(res);
+            }
+          }
+        );
+      }
+
       if (hasNewSpikeOrEscalation && acknowledgedRef.current) {
         acknowledgedRef.current = false;
         setIsAlarmAcknowledged(false);
@@ -570,7 +626,6 @@ export function useSensorStream(
     [nodes]
   );
 
-  // Exclude offline nodes from peak calculation so stale readings never pollute worst-case display
   const peakReadings = useMemo<PeakReadingsMap>(() => {
     const emptyFallback = createEmptyPoint();
     if (onlineNodes.length === 0) {
@@ -609,7 +664,6 @@ export function useSensorStream(
     return getHighestStatus(onlineStatuses);
   }, [onlineNodes]);
 
-  // Auto-reset alarm acknowledgement once all online nodes return to NORMAL
   useEffect(() => {
     if (overallStatus === 'normal' && isAlarmAcknowledged) {
       acknowledgedRef.current = false;
@@ -619,10 +673,16 @@ export function useSensorStream(
 
   const updateThresholds = useCallback((next: ThresholdMap) => {
     setThresholds(next);
+    void saveThresholdsToSupabase(next).then((res) => {
+      if (res) setSupabaseSync(res);
+    });
   }, []);
 
   const resetThresholds = useCallback(() => {
     setThresholds(DEFAULT_THRESHOLDS);
+    void saveThresholdsToSupabase(DEFAULT_THRESHOLDS).then((res) => {
+      if (res) setSupabaseSync(res);
+    });
   }, []);
 
   const clearAlertLogs = useCallback(() => {
@@ -655,5 +715,6 @@ export function useSensorStream(
     isConnected: connectionState === 'connected',
     lastUpdatedAt,
     sampleCount,
+    supabaseSync,
   };
 }

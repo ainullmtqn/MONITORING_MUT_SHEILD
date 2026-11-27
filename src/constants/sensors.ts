@@ -21,28 +21,28 @@ export const SENSOR_NODES: SensorNodeConfig[] = [
     code: 'NODE-01',
     name: 'MUT Sumbu Kebangsaan Barat',
     coordinates: { lat: -0.9652, lng: 116.7038 },
-    depth: '-4.5 m',
+    depth: '-6.5 m',
   },
   {
     id: 'node-02',
     code: 'NODE-02',
     name: 'MUT Sektor Istana Garuda',
     coordinates: { lat: -0.9624, lng: 116.7045 },
-    depth: '-5.0 m',
+    depth: '-8.5 m',
   },
   {
     id: 'node-03',
     code: 'NODE-03',
     name: 'MUT Simpang Titik Nol',
     coordinates: { lat: -0.9730, lng: 116.7094 },
-    depth: '-4.0 m',
+    depth: '-10.2 m',
   },
   {
     id: 'node-04',
     code: 'NODE-04',
     name: 'MUT Kawasan Kemenko 1',
     coordinates: { lat: -0.9685, lng: 116.7062 },
-    depth: '-4.8 m',
+    depth: '-12.0 m',
   },
 ];
 
