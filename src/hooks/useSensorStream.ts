@@ -307,10 +307,31 @@ export function useSensorStream(
     const client: MqttClient = mqtt.connect(MQTT_BROKER_URL, {
       clientId: `mut-ikn-web-${Math.random().toString(16).slice(2, 10)}`,
       clean: true,
-      reconnectPeriod: 3000,
+      reconnectPeriod: 2000,
       connectTimeout: 10000,
-      keepalive: 30,
+      keepalive: 120,
+      reschedulePings: true,
     });
+
+    const handleTabResume = () => {
+      if (disposed) return;
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') {
+        return;
+      }
+      setNowMs(Date.now());
+      if (!client.connected) {
+        setConnectionState('connecting');
+        client.reconnect();
+      }
+    };
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleTabResume);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('focus', handleTabResume);
+      window.addEventListener('online', handleTabResume);
+    }
 
     client.on('connect', () => {
       if (disposed) return;
@@ -579,6 +600,13 @@ export function useSensorStream(
 
     return () => {
       disposed = true;
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleTabResume);
+      }
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('focus', handleTabResume);
+        window.removeEventListener('online', handleTabResume);
+      }
       Object.values(toastTimersRef.current).forEach((timerId) => {
         window.clearTimeout(timerId);
       });
