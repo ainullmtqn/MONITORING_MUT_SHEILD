@@ -1,4 +1,4 @@
-import { Flame, Droplets, Thermometer, Wind } from 'lucide-react';
+import { Droplets, Flame, Thermometer, Wind } from 'lucide-react';
 import { formatSensorValue } from '../constants/sensors';
 import { SensorMeta, SensorStatus, SensorThreshold } from '../types/sensor';
 
@@ -7,6 +7,7 @@ interface SensorCardProps {
   value: number;
   threshold: SensorThreshold;
   status: SensorStatus;
+  variant?: 'primary' | 'compact';
 }
 
 const SENSOR_ICONS = {
@@ -45,9 +46,16 @@ const STATUS_STYLES: Record<
   },
 };
 
-export function SensorCard({ meta, value, threshold, status }: SensorCardProps) {
+export function SensorCard({
+  meta,
+  value,
+  threshold,
+  status,
+  variant = 'primary',
+}: SensorCardProps) {
   const Icon = SENSOR_ICONS[meta.key];
   const style = STATUS_STYLES[status];
+  const isPrimary = variant === 'primary';
 
   const span = meta.max - meta.min;
   const valuePct = Math.min(100, Math.max(0, ((value - meta.min) / span) * 100));
@@ -62,66 +70,120 @@ export function SensorCard({ meta, value, threshold, status }: SensorCardProps) 
 
   return (
     <article
-      className={`bg-white border ${style.accentBorder} rounded-md p-3.5 flex flex-col justify-between gap-2.5`}
+      className={`bg-white border ${style.accentBorder} rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex flex-col justify-between ${
+        isPrimary ? 'p-4 gap-3' : 'p-3 gap-2'
+      }`}
     >
       <div className="flex items-start justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0">
-          <div className="w-7 h-7 rounded bg-[#F4F5F7] border border-[#E2E5EA] flex items-center justify-center text-[#64748B] shrink-0">
-            <Icon className="w-3.5 h-3.5" />
+          <div
+            className={`rounded bg-[#F4F5F7] border border-[#E2E5EA] flex items-center justify-center text-[#64748B] shrink-0 ${
+              isPrimary ? 'w-8 h-8' : 'w-6 h-6'
+            }`}
+          >
+            <Icon className={isPrimary ? 'w-4 h-4' : 'w-3.5 h-3.5'} />
           </div>
           <div className="min-w-0">
-            <h2 className="text-xs sm:text-sm font-semibold text-[#1E293B] truncate">
+            <h2
+              className={`font-semibold text-[#1E293B] truncate ${
+                isPrimary ? 'text-sm sm:text-base' : 'text-xs'
+              }`}
+            >
               {meta.label}
             </h2>
-            <p className="text-[11px] text-[#64748B] truncate">{meta.sublabel}</p>
+            <p
+              className={`text-[#64748B] truncate ${
+                isPrimary ? 'text-xs' : 'text-[10px]'
+              }`}
+            >
+              {meta.sublabel}
+            </p>
           </div>
         </div>
 
         <span
-          className={`px-2 py-0.5 rounded border text-[10px] font-mono-tabular font-semibold tracking-wide shrink-0 ${style.badge}`}
+          className={`rounded border font-mono-tabular font-semibold tracking-wide shrink-0 ${
+            isPrimary ? 'px-2 py-0.5 text-[11px]' : 'px-1.5 py-0.5 text-[9px]'
+          } ${style.badge}`}
         >
           {style.label}
         </span>
       </div>
 
       <div className="flex items-baseline gap-1.5">
-        <span className="text-2xl xl:text-[28px] leading-none font-semibold font-mono-tabular text-[#1E293B]">
+        <span
+          className={`leading-none font-bold font-mono-tabular text-[#1E293B] ${
+            isPrimary
+              ? 'text-3xl xl:text-[36px]'
+              : 'text-xl xl:text-2xl'
+          }`}
+        >
           {formatSensorValue(value, meta.decimals)}
         </span>
-        <span className="text-xs font-mono-tabular text-[#64748B]">
+        <span
+          className={`font-mono-tabular text-[#64748B] ${
+            isPrimary ? 'text-sm' : 'text-[11px]'
+          }`}
+        >
           {meta.unit}
         </span>
       </div>
 
       <div className="space-y-1.5">
         <div
-          className="relative h-2.5 w-full bg-[#E2E5EA] rounded-[2px]"
+          className={`relative w-full bg-[#E2E5EA] rounded-[2px] ${
+            isPrimary ? 'h-3' : 'h-2'
+          }`}
           aria-label={`Skala ${meta.label}: ${formatSensorValue(value, meta.decimals)} ${meta.unit}`}
         >
+          {isPrimary && (
+            <>
+              <div
+                className="absolute inset-y-0 bg-[#FFFBEB]"
+                style={{
+                  left: `${warningPct}%`,
+                  width: `${Math.max(0, dangerPct - warningPct)}%`,
+                }}
+              />
+              <div
+                className="absolute inset-y-0 right-0 bg-[#FEF2F2]"
+                style={{ left: `${dangerPct}%` }}
+              />
+            </>
+          )}
+
           <div
-            className={`h-full rounded-[2px] transition-[width] duration-300 ${style.barColor}`}
+            className={`relative h-full rounded-[2px] transition-[width] duration-300 ${style.barColor}`}
             style={{ width: `${valuePct}%` }}
           />
           <div
-            className="absolute -top-[3px] w-[2px] h-4 bg-[#B45309]"
+            className={`absolute w-[2px] bg-[#B45309] ${
+              isPrimary ? '-top-[3px] h-[18px]' : '-top-[2px] h-3'
+            }`}
             style={{ left: `calc(${warningPct}% - 1px)` }}
             title={`Batas Waspada: ${threshold.warning} ${meta.unit}`}
           />
           <div
-            className="absolute -top-[3px] w-[2px] h-4 bg-[#B91C1C]"
+            className={`absolute w-[2px] bg-[#B91C1C] ${
+              isPrimary ? '-top-[3px] h-[18px]' : '-top-[2px] h-3'
+            }`}
             style={{ left: `calc(${dangerPct}% - 1px)` }}
             title={`Batas Bahaya: ${threshold.danger} ${meta.unit}`}
           />
         </div>
 
-        <div className="flex items-center justify-between text-[11px] font-mono-tabular text-[#64748B]">
+        <div
+          className={`flex items-center justify-between font-mono-tabular text-[#64748B] ${
+            isPrimary ? 'text-[11px]' : 'text-[10px]'
+          }`}
+        >
           <span>{meta.min}</span>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2">
             <span className="text-[#B45309]">W:{threshold.warning}</span>
             <span className="text-[#B91C1C]">B:{threshold.danger}</span>
           </div>
           <span>
-            {meta.max} {meta.unit}
+            {meta.max} {isPrimary ? meta.unit : ''}
           </span>
         </div>
       </div>

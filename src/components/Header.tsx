@@ -18,7 +18,7 @@ export function Header({
   onOpenThresholdModal,
 }: HeaderProps) {
   return (
-    <header className="bg-white border border-[#E2E5EA] rounded-md px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
+    <header className="bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 shrink-0">
       <div className="flex items-center gap-3 min-w-0">
         <div className="w-8 h-8 rounded bg-[#F4F5F7] border border-[#E2E5EA] flex items-center justify-center text-[#1E293B] shrink-0">
           <Activity className="w-4 h-4" />
@@ -28,7 +28,7 @@ export function Header({
             Dashboard Monitoring Sensor IoT
           </h1>
           <p className="text-[11px] text-[#64748B] font-mono-tabular truncate">
-            UNIT: LAB-ENV-01 · MQ-4 / MQ-135 / DHT11 · SAMPEL #{sampleCount}
+            UNIT: LAB-ENV-01 • MQ-4 / MQ-135 / DHT11 • SAMPEL #{sampleCount}
           </p>
         </div>
       </div>

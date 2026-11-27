@@ -9,7 +9,7 @@ interface AlertLogProps {
 
 export function AlertLog({ logs, onClearLogs }: AlertLogProps) {
   return (
-    <section className="bg-white border border-[#E2E5EA] rounded-md flex flex-col min-h-[240px] lg:min-h-0 h-full">
+    <section className="bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex flex-col min-h-[240px] lg:min-h-0 h-full">
       <div className="px-3.5 py-2.5 border-b border-[#E2E5EA] flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <ClipboardList className="w-4 h-4 text-[#64748B] shrink-0" />

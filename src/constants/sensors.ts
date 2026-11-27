@@ -29,7 +29,7 @@ export const SENSOR_METADATA: Record<SensorKey, SensorMeta> = {
     max: 1000,
     step: 10,
     decimals: 0,
-    chartColor: '#0F766E',
+    chartColor: '#16A34A',
     actionAdvice: {
       warning: 'Aktifkan blower sirkulasi udara segar untuk menurunkan konsentrasi polutan.',
       danger: 'Kualitas udara kritis! Hentikan aktivitas proses kimia dan buka ventilasi penuh.',

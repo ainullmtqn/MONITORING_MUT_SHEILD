@@ -46,7 +46,7 @@ export function App() {
 
       <section
         aria-label="Ringkasan nilai sensor real-time"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 shrink-0"
+        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_2fr_1fr_1fr] gap-3 shrink-0"
       >
         {SENSOR_ORDER.map((key) => (
           <SensorCard
@@ -55,6 +55,7 @@ export function App() {
             value={latest[key]}
             threshold={thresholds[key]}
             status={statuses[key]}
+            variant={key === 'mq4' || key === 'mq135' ? 'primary' : 'compact'}
           />
         ))}
       </section>
