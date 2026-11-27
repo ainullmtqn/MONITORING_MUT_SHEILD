@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { AlertBanner } from './components/AlertBanner';
 import { AlertLog } from './components/AlertLog';
+import { Dht11Card } from './components/Dht11Card';
 import { Header } from './components/Header';
 import { SensorCard } from './components/SensorCard';
 import { TelemetryChart } from './components/TelemetryChart';
 import { ThresholdModal } from './components/ThresholdModal';
-import { SENSOR_METADATA, SENSOR_ORDER } from './constants/sensors';
+import { SENSOR_METADATA } from './constants/sensors';
 import { useAlertAudio } from './hooks/useAlertAudio';
 import { useSensorStream } from './hooks/useSensorStream';
 
@@ -46,18 +47,28 @@ export function App() {
 
       <section
         aria-label="Ringkasan nilai sensor real-time"
-        className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[2fr_2fr_1fr_1fr] gap-3 shrink-0"
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1.8fr_1.8fr_1.4fr] gap-3 shrink-0"
       >
-        {SENSOR_ORDER.map((key) => (
-          <SensorCard
-            key={key}
-            meta={SENSOR_METADATA[key]}
-            value={latest[key]}
-            threshold={thresholds[key]}
-            status={statuses[key]}
-            variant={key === 'mq4' || key === 'mq135' ? 'primary' : 'compact'}
-          />
-        ))}
+        <SensorCard
+          meta={SENSOR_METADATA.mq4}
+          value={latest.mq4}
+          threshold={thresholds.mq4}
+          status={statuses.mq4}
+        />
+        <SensorCard
+          meta={SENSOR_METADATA.mq135}
+          value={latest.mq135}
+          threshold={thresholds.mq135}
+          status={statuses.mq135}
+        />
+        <Dht11Card
+          temperature={latest.temperature}
+          humidity={latest.humidity}
+          tempThreshold={thresholds.temperature}
+          humidityThreshold={thresholds.humidity}
+          tempStatus={statuses.temperature}
+          humidityStatus={statuses.humidity}
+        />
       </section>
 
       <section
