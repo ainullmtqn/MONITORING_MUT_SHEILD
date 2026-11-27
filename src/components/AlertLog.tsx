@@ -5,15 +5,22 @@ import { AlertLogEntry } from '../types/sensor';
 interface AlertLogProps {
   logs: AlertLogEntry[];
   onClearLogs: () => void;
+  embedded?: boolean;
 }
 
-export function AlertLog({ logs, onClearLogs }: AlertLogProps) {
+export function AlertLog({ logs, onClearLogs, embedded = false }: AlertLogProps) {
   return (
-    <section className="bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex flex-col min-h-[190px] lg:min-h-0 flex-1">
+    <section
+      className={`flex flex-col min-h-0 flex-1 ${
+        embedded
+          ? ''
+          : 'bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+      }`}
+    >
       <div className="px-3.5 py-2 border-b border-[#E2E5EA] flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <ClipboardList className="w-4 h-4 text-[#64748B] shrink-0" />
-          <h2 className="text-sm font-semibold text-[#1E293B] truncate">
+          <h2 className="text-xs sm:text-sm font-semibold text-[#1E293B] truncate">
             Riwayat Peringatan
           </h2>
           <span className="px-1.5 py-0.5 text-[11px] font-mono-tabular bg-[#F4F5F7] border border-[#E2E5EA] rounded text-[#64748B]">
@@ -34,9 +41,9 @@ export function AlertLog({ logs, onClearLogs }: AlertLogProps) {
         )}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto lab-scroll divide-y divide-[#E2E5EA]">
+      <div className="flex-1 min-h-0 overflow-y-auto lab-scroll">
         {logs.length === 0 ? (
-          <div className="h-full min-h-[110px] flex flex-col items-center justify-center p-4 text-center">
+          <div className="h-full min-h-[140px] flex flex-col items-center justify-center p-4 text-center">
             <p className="text-xs font-medium text-[#64748B]">
               Belum ada catatan pelanggaran ambang batas.
             </p>
@@ -45,50 +52,59 @@ export function AlertLog({ logs, onClearLogs }: AlertLogProps) {
             </p>
           </div>
         ) : (
-          logs.map((entry) => {
-            const meta = SENSOR_METADATA[entry.sensorKey];
-            const isDanger = entry.status === 'danger';
-            return (
-              <div
-                key={entry.id}
-                className="px-3.5 py-2 flex items-center justify-between gap-2 text-xs hover:bg-[#F8FAFC]"
-              >
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
-                    <span className="font-mono-tabular text-[11px] text-[#64748B]">
+          <table className="w-full text-left border-collapse">
+            <thead className="sticky top-0 bg-[#F4F5F7] border-b border-[#E2E5EA] text-[10px] font-mono-tabular uppercase tracking-wide text-[#64748B]">
+              <tr>
+                <th className="py-1.5 pl-3.5 pr-2 font-semibold">Waktu</th>
+                <th className="py-1.5 px-2 font-semibold">Lokasi & Sensor</th>
+                <th className="py-1.5 px-2 text-right font-semibold">Nilai</th>
+                <th className="py-1.5 pl-2 pr-3.5 text-right font-semibold">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#E2E5EA] text-xs">
+              {logs.map((entry) => {
+                const meta = SENSOR_METADATA[entry.sensorKey];
+                const isDanger = entry.status === 'danger';
+                return (
+                  <tr key={entry.id} className="hover:bg-[#F8FAFC]">
+                    <td className="py-2 pl-3.5 pr-2 font-mono-tabular text-[11px] text-[#64748B] whitespace-nowrap align-top">
                       {entry.timestamp}
-                    </span>
-                    <span className="font-semibold text-[#1E293B]">
-                      {entry.sensorName}
-                    </span>
-                    <span className="text-[10px] font-mono-tabular text-[#64748B] truncate">
-                      ({entry.nodeName})
-                    </span>
-                  </div>
-                  <div className="font-mono-tabular text-[10px] text-[#64748B] mt-0.5 truncate">
-                    [{entry.nodeLocationTag}]
-                  </div>
-                  <div className="font-mono-tabular text-[11px] text-[#64748B] mt-0.5">
-                    Nilai:{' '}
-                    <span className="text-[#1E293B] font-semibold">
-                      {formatSensorValue(entry.value, meta.decimals)} {entry.unit}
-                    </span>{' '}
-                    (Batas ≥ {entry.thresholdValue} {entry.unit})
-                  </div>
-                </div>
-
-                <span
-                  className={`px-2 py-0.5 rounded border text-[10px] font-mono-tabular font-semibold shrink-0 ${
-                    isDanger
-                      ? 'bg-[#FEF2F2] border-[#FECACA] text-[#B91C1C]'
-                      : 'bg-[#FFFBEB] border-[#FDE68A] text-[#B45309]'
-                  }`}
-                >
-                  {isDanger ? 'BAHAYA' : 'WASPADA'}
-                </span>
-              </div>
-            );
-          })
+                    </td>
+                    <td className="py-2 px-2 min-w-0 align-top">
+                      <div className="font-semibold text-[#1E293B] truncate">
+                        {entry.sensorName}{' '}
+                        <span className="font-normal text-[#64748B] text-[11px]">
+                          • {entry.nodeName}
+                        </span>
+                      </div>
+                      <div className="font-mono-tabular text-[10px] text-[#64748B] truncate">
+                        [{entry.nodeLocationTag}]
+                      </div>
+                    </td>
+                    <td className="py-2 px-2 text-right font-mono-tabular whitespace-nowrap align-top">
+                      <div className="font-semibold text-[#1E293B]">
+                        {formatSensorValue(entry.value, meta.decimals)} {entry.unit}
+                      </div>
+                      <div className="text-[10px] text-[#64748B]">
+                        ≥{entry.thresholdValue}
+                      </div>
+                    </td>
+                    <td className="py-2 pl-2 pr-3.5 text-right whitespace-nowrap align-top">
+                      <span
+                        className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-mono-tabular font-semibold ${
+                          isDanger
+                            ? 'bg-[#FEF2F2] border-[#FECACA] text-[#B91C1C]'
+                            : 'bg-[#FFFBEB] border-[#FDE68A] text-[#B45309]'
+                        }`}
+                      >
+                        {isDanger ? 'BAHAYA' : 'WASPADA'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
     </section>

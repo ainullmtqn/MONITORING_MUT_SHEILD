@@ -88,7 +88,7 @@ export async function fetchLatestNodeReadings(
 ): Promise<Record<string, TelemetryPoint>> {
   sim.tick += 1;
 
-  if (sim.tick % 5 === 0) {
+  if (sim.tick === 2 || sim.tick % 5 === 0) {
     const activeSpikes = nodes.filter(
       (n) => sim.byNode[n.id].spikeTicksRemaining > 0
     );

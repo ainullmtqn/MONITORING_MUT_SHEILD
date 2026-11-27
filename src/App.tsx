@@ -16,6 +16,8 @@ import { useAlertAudio } from './hooks/useAlertAudio';
 import { useSensorStream } from './hooks/useSensorStream';
 import { SensorNodeConfig } from './types/sensor';
 
+type RightPanelTab = 'nodes' | 'logs';
+
 function formatPeakSource(node: SensorNodeConfig): string {
   return `Tertinggi: ${node.code} (${formatNodeLocation(node)})`;
 }
@@ -26,6 +28,7 @@ function formatActiveSource(node: SensorNodeConfig): string {
 
 export function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string>('all');
+  const [rightTab, setRightTab] = useState<RightPanelTab>('nodes');
   const [isThresholdModalOpen, setIsThresholdModalOpen] = useState(false);
   const { isAudioEnabled, toggleAudio, triggerAlarmTone } = useAlertAudio();
 
@@ -105,8 +108,12 @@ export function App() {
     ? formatNodeLocation(activeNode.config)
     : 'KIPP IKN • Nilai tertinggi lintas semua titik bawah tanah';
 
+  const triggeredNodeCount = nodes.filter(
+    (n) => n.overallStatus !== 'normal'
+  ).length;
+
   return (
-    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#F4F5F7] text-[#1E293B] p-3 lg:p-4 flex flex-col gap-3">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#F4F5F7] text-[#1E293B] p-2.5 lg:p-3.5 flex flex-col gap-2.5">
       <Header
         nodes={SENSOR_NODES}
         selectedNodeId={selectedNodeId}
@@ -123,7 +130,7 @@ export function App() {
 
       <section
         aria-label="Ringkasan nilai sensor real-time"
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[35fr_35fr_30fr] gap-3 shrink-0"
+        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[35fr_35fr_30fr] gap-2.5 shrink-0"
       >
         <SensorCard
           meta={SENSOR_METADATA.mq4}
@@ -153,7 +160,7 @@ export function App() {
 
       <section
         aria-label="Grafik telemetri, status titik bawah tanah, dan riwayat peringatan"
-        className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[65fr_35fr] gap-3"
+        className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[65fr_35fr] gap-2.5"
       >
         <div className="min-h-0 h-full">
           <TelemetryChart
@@ -164,13 +171,75 @@ export function App() {
           />
         </div>
 
-        <div className="min-h-0 h-full flex flex-col gap-3">
-          <NodeStatusPanel
-            sortedNodes={sortedNodes}
-            selectedNodeId={selectedNodeId}
-            onSelectNode={setSelectedNodeId}
-          />
-          <AlertLog logs={alertLogs} onClearLogs={clearAlertLogs} />
+        <div className="min-h-[260px] lg:min-h-0 h-full bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex flex-col overflow-hidden">
+          <div
+            role="tablist"
+            aria-label="Panel kanan monitoring titik dan riwayat peringatan"
+            className="grid grid-cols-2 border-b border-[#E2E5EA] bg-[#F4F5F7] p-1 gap-1 shrink-0"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={rightTab === 'nodes'}
+              onClick={() => setRightTab('nodes')}
+              className={`px-2.5 py-1.5 rounded-[3px] text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                rightTab === 'nodes'
+                  ? 'bg-white text-[#1E293B] border border-[#E2E5EA]'
+                  : 'text-[#64748B] hover:text-[#1E293B] border border-transparent'
+              }`}
+            >
+              <span className="truncate">Status Titik</span>
+              <span
+                className={`px-1.5 py-0.2 rounded text-[10px] font-mono-tabular font-semibold ${
+                  triggeredNodeCount > 0
+                    ? 'bg-[#FEF2F2] text-[#B91C1C] border border-[#FECACA]'
+                    : 'bg-[#F4F5F7] text-[#64748B] border border-[#E2E5EA]'
+                }`}
+              >
+                {nodes.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              role="tab"
+              aria-selected={rightTab === 'logs'}
+              onClick={() => setRightTab('logs')}
+              className={`px-2.5 py-1.5 rounded-[3px] text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer ${
+                rightTab === 'logs'
+                  ? 'bg-white text-[#1E293B] border border-[#E2E5EA]'
+                  : 'text-[#64748B] hover:text-[#1E293B] border border-transparent'
+              }`}
+            >
+              <span className="truncate">Riwayat Peringatan</span>
+              <span
+                className={`px-1.5 py-0.2 rounded text-[10px] font-mono-tabular font-semibold ${
+                  alertLogs.length > 0
+                    ? 'bg-[#FFFBEB] text-[#B45309] border border-[#FDE68A]'
+                    : 'bg-[#F4F5F7] text-[#64748B] border border-[#E2E5EA]'
+                }`}
+              >
+                {alertLogs.length}
+              </span>
+            </button>
+          </div>
+
+          <div className="flex-1 min-h-0 flex flex-col">
+            {rightTab === 'nodes' ? (
+              <NodeStatusPanel
+                sortedNodes={sortedNodes}
+                selectedNodeId={selectedNodeId}
+                onSelectNode={setSelectedNodeId}
+                embedded
+              />
+            ) : (
+              <AlertLog
+                logs={alertLogs}
+                onClearLogs={clearAlertLogs}
+                embedded
+              />
+            )}
+          </div>
         </div>
       </section>
 
