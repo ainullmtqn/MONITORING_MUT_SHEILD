@@ -282,6 +282,9 @@ export function useSensorStream(
             : [...prev, ...res.accessLogs].slice(0, MAX_ALERT_LOGS)
         );
       }
+      if (res.thresholds) {
+        setThresholds(res.thresholds);
+      }
     });
   }, []);
 
@@ -474,7 +477,9 @@ export function useSensorStream(
           mq4Value: mq4,
         };
         setAccessLogs((prev) => [accessEntry, ...prev].slice(0, MAX_ALERT_LOGS));
-        void insertRfidLogToSupabase(accessEntry);
+        void insertRfidLogToSupabase(accessEntry).then((res) => {
+          if (res && !disposed) setSupabaseSync(res);
+        });
 
         const toastId = `toast-${epochMs}-${targetNode.id}-${Math.random().toString(36).slice(2, 6)}`;
         const toast: RfidToastNotification = {
@@ -534,7 +539,9 @@ export function useSensorStream(
             status,
           };
           newEntries.push(entry);
-          void insertAlertLogToSupabase(entry);
+          void insertAlertLogToSupabase(entry).then((res) => {
+            if (res && !disposed) setSupabaseSync(res);
+          });
         }
 
         prevStatusRef.current[targetNode.id][key] = status;
