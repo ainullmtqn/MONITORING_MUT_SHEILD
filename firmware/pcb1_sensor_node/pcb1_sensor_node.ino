@@ -1,202 +1,83 @@
-/**
- * MUT-IKN Monitor — Firmware PCB 1 (Node Sensor Lapangan + Akses RFID + Buzzer)
- *
- * Komponen PCB 1:
- * 1. ESP32
- * 2. TOF200C (VL53L0X Laser Distance, I2C addr 0x29)
- * 3. MQ-4 (Gas Metana CH4, Analog ADC)
- * 4. MQ-135 (Kualitas Udara VOC/CO2, Analog ADC)
- * 5. DHT11 (Suhu & Kelembapan)
- * 6. RFID RC522 (SPI)
- * 7. Buzzer (Alarm lokal & feedback RFID)
- * 8. Baterai (Pembacaan tegangan via pembagi tegangan ADC)
- *
- * Komunikasi:
- * - MQTT Publish tiap 2 detik ke `broker.emqx.io:1883` topik `ikn/mut/NODE-01`
- * - Supabase HTTP POST langsung (24/7 meski dashboard web ditutup):
- *   `sensor_logs` (tiap 15 dtk / perubahan status), `alert_logs`, `rfid_logs`
- *
- * Library Arduino IDE:
- * - PubSubClient (Nick O'Leary)
- * - ArduinoJson (Benoit Blanchon)
- * - DHT sensor library (Adafruit)
- * - Adafruit_VL53L0X (untuk TOF200C I2C)
- * - MFRC522 (GithubCommunity)
- */
-
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <PubSubClient.h>
-#include <ArduinoJson.h>
-#include <Wire.h>
-#include <Adafruit_VL53L0X.h>
 #include <DHT.h>
-#include <SPI.h>
-#include <MFRC522.h>
+#include <ArduinoJson.h>
 
-// ======================== KONFIGURASI JARINGAN & NODE ========================
-const char* WIFI_SSID     = "NAMA_WIFI_ANDA";
-const char* WIFI_PASSWORD = "PASSWORD_WIFI_ANDA";
+// --- Konfigurasi Wi-Fi & MQTT ---
+const char* ssid = "Wokwi-GUEST";
+const char* password = "";
+const char* mqtt_server = "broker.emqx.io";
+const int mqtt_port = 1883;
+const char* mqtt_topic = "ikn/mut/node01";
+const char* node_id = "NODE-01";
 
-const char* NODE_ID       = "NODE-01";         // Ubah untuk NODE-01 .. NODE-04
-const char* MQTT_BROKER   = "broker.emqx.io";
-const int   MQTT_PORT     = 1883;
-const char* MQTT_TOPIC    = "ikn/mut/NODE-01"; // Harus sesuai dengan NODE_ID
+// --- Konfigurasi Supabase REST API (Aktif 24/7 meski web tidak dibuka) ---
+const char* supabase_url = "https://yhtvyongrbpmscvslgks.supabase.co";
+const char* supabase_key = "sb_publishable_Ys8kCYOZyB5u5ze7yArtew_PKscjpK8";
 
-// ======================== KONFIGURASI SUPABASE REST API ======================
-const char* SUPABASE_URL  = "https://yhtvyongrbpmscvslgks.supabase.co";
-const char* SUPABASE_KEY  = "sb_publishable_Ys8kCYOZyB5u5ze7yArtew_PKscjpK8";
+// --- Pemetaan Pin ---
+#define PIN_MQ4     34
+#define PIN_MQ135   35
+#define PIN_DHT     32
+#define PIN_BUZZER  25
+#define PIN_RFID    5
+#define PIN_TOF     33
+#define PIN_DOOR    26 // Hubungkan ke Relay/Solenoid (atau LED Hijau di Wokwi)
 
-// ======================== PIN HARDWARE PCB 1 =================================
-// Sesuaikan nomor GPIO di bawah dengan jalur PCB 1 Anda
-#define PIN_MQ4        34   // Analog Input (ADC1)
-#define PIN_MQ135      35   // Analog Input (ADC1)
-#define PIN_BAT_ADC    32   // Analog Input pembagi tegangan baterai (ADC1)
-#define PIN_DHT        4    // Digital Data DHT11
-#define DHTTYPE        DHT11
-
-#define PIN_I2C_SDA    21   // SDA TOF200C
-#define PIN_I2C_SCL    22   // SCL TOF200C
-
-#define PIN_SS_RFID    5    // SDA / SS RC522
-#define PIN_RST_RFID   27   // RST RC522 (SPI SCK=18, MISO=19, MOSI=23)
-
-#define PIN_BUZZER     25   // Buzzer aktif/pasif
-#define PIN_RELAY_DOOR 26   // Opsional jika ada solenoid/indikator pintu
-
-// ======================== AMBANG BATAS DEFAULT ===============================
-const float MQ4_WARNING   = 500.0;
-const float MQ4_DANGER    = 1000.0;
-const float MQ135_WARNING = 350.0;
-const float MQ135_DANGER  = 700.0;
-const float TEMP_WARNING  = 32.0;
-const float TEMP_DANGER   = 38.0;
-const float HUM_WARNING   = 75.0;
-const float HUM_DANGER    = 85.0;
-
-// ======================== INTERVAL WAKTU =====================================
-const unsigned long MQTT_INTERVAL_MS     = 2000;   // Publish MQTT tiap 2 detik
-const unsigned long SUPABASE_INTERVAL_MS = 15000;  // Simpan sensor_logs tiap 15 detik
-const unsigned long DOOR_OPEN_MS         = 5000;   // Status pintu terbuka 5 detik
-
-WiFiClient wifiClient;
-PubSubClient mqttClient(wifiClient);
-Adafruit_VL53L0X tof = Adafruit_VL53L0X();
+#define DHTTYPE DHT22 // Ganti DHT11 saat pindah ke hardware fisik
 DHT dht(PIN_DHT, DHTTYPE);
-MFRC522 rfid(PIN_SS_RFID, PIN_RST_RFID);
 
-bool tofReady                    = false;
-unsigned long lastMqttSentMs     = 0;
-unsigned long lastSupabaseSentMs = 0;
-unsigned long lastBuzzerToggleMs = 0;
-unsigned long doorOpenedAtMs     = 0;
-bool isDoorOpen                  = false;
-bool buzzerState                 = false;
+WiFiClient espClient;
+PubSubClient client(espClient);
 
-String prevOverallStatus = "NORMAL";
-String prevMq4Status     = "NORMAL";
-String prevMq135Status   = "NORMAL";
-String prevTempStatus    = "NORMAL";
-String prevHumStatus     = "NORMAL";
+// --- Ambang Batas (Threshold) ---
+const int MQ4_WASPADA   = 500;
+const int MQ4_BAHAYA    = 1000;
+const int MQ135_WASPADA = 350;
+const int MQ135_BAHAYA  = 700;
+const float SUHU_MAX    = 38.0;
 
-// ======================== KONEKSI WIFI & MQTT ================================
-void connectWiFi() {
-  if (WiFi.status() == WL_CONNECTED) return;
-  Serial.print("[PCB1] Menghubungkan WiFi");
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+const unsigned long SUPABASE_INTERVAL_MS = 15000; // Simpan sensor_logs tiap 15 detik
+
+unsigned long lastSend = 0;
+unsigned long lastSupabaseSend = 0;
+unsigned long doorOpenTime = 0;
+bool isDoorOpen = false;
+bool lastRfidState = HIGH;
+
+// Variabel pembacaan terbaru
+int mq4_ppm = 0;
+int mq135_ppm = 0;
+int jarak_cm = 0;
+float suhu = 0.0;
+float kelembapan = 0.0;
+String statusSensor = "NORMAL";
+String prevSupabaseStatus = "NORMAL";
+String doorStatus = "LOCKED";
+
+void setup_wifi() {
+  Serial.print("Menghubungkan ke Wi-Fi");
+  WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
+    delay(300);
     Serial.print(".");
   }
-  Serial.println("\n[PCB1] WiFi terhubung. IP: " + WiFi.localIP().toString());
+  Serial.println("\nWi-Fi Terhubung!");
 }
 
-void connectMQTT() {
-  while (!mqttClient.connected()) {
-    String clientId = String("pcb1-") + NODE_ID + "-" + String(random(1000, 9999));
-    Serial.print("[PCB1] Menghubungkan MQTT...");
-    if (mqttClient.connect(clientId.c_str())) {
-      Serial.println(" terhubung!");
+void reconnect_mqtt() {
+  while (!client.connected()) {
+    String clientId = "ESP32-PCB1-" + String(random(0xffff), HEX);
+    if (client.connect(clientId.c_str())) {
+      Serial.println("MQTT Terhubung!");
     } else {
-      Serial.print(" gagal rc=");
-      Serial.println(mqttClient.state());
       delay(3000);
     }
   }
 }
 
-// ======================== PEMBACAAN SENSOR ===================================
-float readMqPpm(int pin, float maxScale) {
-  int raw = analogRead(pin); // ADC 12-bit (0..4095)
-  return (raw / 4095.0f) * maxScale;
-}
-
-int readTofDistanceCm() {
-  if (!tofReady) return 0;
-  VL53L0X_RangingMeasurementData_t measure;
-  tof.rangingTest(&measure, false);
-  if (measure.RangeStatus != 4) {
-    return (int)round(measure.RangeMilliMeter / 10.0f);
-  }
-  return 0;
-}
-
-int readBatteryPercent() {
-  int raw = analogRead(PIN_BAT_ADC);
-  // Sesuaikan rentang ADC dengan pembagi tegangan baterai Anda (mis. Li-Ion 3.0V-4.2V)
-  int pct = map(raw, 2400, 4095, 0, 100);
-  return constrain(pct, 0, 100);
-}
-
-String evalLevel(float value, float warn, float danger) {
-  if (value >= danger) return "BAHAYA";
-  if (value >= warn) return "WASPADA";
-  return "NORMAL";
-}
-
-String highestStatus(const String& a, const String& b, const String& c, const String& d) {
-  if (a == "BAHAYA" || b == "BAHAYA" || c == "BAHAYA" || d == "BAHAYA") return "BAHAYA";
-  if (a == "WASPADA" || b == "WASPADA" || c == "WASPADA" || d == "WASPADA") return "WASPADA";
-  return "NORMAL";
-}
-
-// ======================== KONTROL BUZZER =====================================
-void beepRfidFeedback(bool granted) {
-  if (granted) {
-    digitalWrite(PIN_BUZZER, HIGH);
-    delay(120);
-    digitalWrite(PIN_BUZZER, LOW);
-  } else {
-    for (int i = 0; i < 2; i++) {
-      digitalWrite(PIN_BUZZER, HIGH);
-      delay(100);
-      digitalWrite(PIN_BUZZER, LOW);
-      delay(80);
-    }
-  }
-}
-
-void updateAlarmBuzzer(const String& overall, unsigned long now) {
-  if (overall == "BAHAYA") {
-    if (now - lastBuzzerToggleMs >= 250) {
-      lastBuzzerToggleMs = now;
-      buzzerState = !buzzerState;
-      digitalWrite(PIN_BUZZER, buzzerState ? HIGH : LOW);
-    }
-  } else if (overall == "WASPADA") {
-    if (now - lastBuzzerToggleMs >= 1000) {
-      lastBuzzerToggleMs = now;
-      buzzerState = !buzzerState;
-      digitalWrite(PIN_BUZZER, buzzerState ? HIGH : LOW);
-    }
-  } else {
-    buzzerState = false;
-    digitalWrite(PIN_BUZZER, LOW);
-  }
-}
-
-// ======================== SUPABASE HTTP POST =================================
 bool postToSupabase(const char* table, const String& jsonBody) {
   if (WiFi.status() != WL_CONNECTED) return false;
 
@@ -204,40 +85,43 @@ bool postToSupabase(const char* table, const String& jsonBody) {
   secClient.setInsecure();
 
   HTTPClient http;
-  String url = String(SUPABASE_URL) + "/rest/v1/" + table;
+  String url = String(supabase_url) + "/rest/v1/" + table;
   if (!http.begin(secClient, url)) return false;
 
+  http.setTimeout(3000);
   http.addHeader("Content-Type", "application/json");
-  http.addHeader("apikey", SUPABASE_KEY);
+  http.addHeader("apikey", supabase_key);
   http.addHeader("Prefer", "return=minimal");
 
-  int code = http.POST(jsonBody);
+  int httpCode = http.POST(jsonBody);
   http.end();
 
-  Serial.printf("[Supabase %s] HTTP %d\n", table, code);
-  return code >= 200 && code < 300;
+  Serial.print("[Supabase ");
+  Serial.print(table);
+  Serial.print("] HTTP ");
+  Serial.println(httpCode);
+  return httpCode >= 200 && httpCode < 300;
 }
 
-void logSensorToSupabase(float mq4, float mq135, float suhu, float kelembapan,
-                         int jarakCm, const String& doorStr, const String& statusStr) {
-  JsonDocument doc;
-  doc["node_id"]    = NODE_ID;
-  doc["mq4"]        = round(mq4);
-  doc["mq135"]      = round(mq135);
-  doc["suhu"]       = round(suhu * 10.0f) / 10.0f;
-  doc["kelembapan"] = round(kelembapan * 10.0f) / 10.0f;
-  doc["jarak"]      = jarakCm;
-  doc["door"]       = doorStr;
-  doc["status"]     = statusStr;
+void kirimSensorKeSupabase() {
+  StaticJsonDocument<256> doc;
+  doc["node_id"]    = node_id;
+  doc["mq4"]        = mq4_ppm;
+  doc["mq135"]      = mq135_ppm;
+  doc["suhu"]       = round(suhu * 10) / 10.0;
+  doc["kelembapan"] = round(kelembapan * 10) / 10.0;
+  doc["jarak"]      = jarak_cm;
+  doc["door"]       = doorStatus;
+  doc["status"]     = statusSensor;
 
   String body;
   serializeJson(doc, body);
   postToSupabase("sensor_logs", body);
 }
 
-void logAlertToSupabase(const char* sensorName, float value, float threshold, const String& level) {
-  JsonDocument doc;
-  doc["node_id"]     = NODE_ID;
+void kirimAlertKeSupabase(const char* sensorName, float value, float threshold, const String& level) {
+  StaticJsonDocument<256> doc;
+  doc["node_id"]     = node_id;
   doc["sensor_name"] = sensorName;
   doc["value"]       = value;
   doc["threshold"]   = threshold;
@@ -248,9 +132,9 @@ void logAlertToSupabase(const char* sensorName, float value, float threshold, co
   postToSupabase("alert_logs", body);
 }
 
-void logRfidToSupabase(const String& doorStr, const char* accessResult) {
-  JsonDocument doc;
-  doc["node_id"]       = NODE_ID;
+void kirimRfidKeSupabase(const String& doorStr, const char* accessResult) {
+  StaticJsonDocument<192> doc;
+  doc["node_id"]       = node_id;
   doc["door_status"]   = doorStr;
   doc["access_result"] = accessResult;
 
@@ -259,134 +143,144 @@ void logRfidToSupabase(const String& doorStr, const char* accessResult) {
   postToSupabase("rfid_logs", body);
 }
 
-// ======================== PUBLISH MQTT =======================================
-void publishTelemetryMqtt(float mq4, float mq135, float suhu, float kelembapan,
-                          int jarakCm, bool rfidTapped, const String& doorStr,
-                          int battery, const String& statusStr) {
-  JsonDocument doc;
-  doc["node_id"]    = NODE_ID;
-  doc["mq4"]        = round(mq4);
-  doc["mq135"]      = round(mq135);
-  doc["suhu"]       = round(suhu * 10.0f) / 10.0f;
-  doc["kelembapan"] = round(kelembapan * 10.0f) / 10.0f;
-  doc["jarak"]      = jarakCm;
-  doc["rfid"]       = rfidTapped;
-  doc["door"]       = doorStr;
-  doc["battery"]    = battery;
-  doc["status"]     = statusStr;
+void bacaDanEvaluasiSensor() {
+  mq4_ppm   = map(analogRead(PIN_MQ4), 0, 4095, 0, 2000);
+  mq135_ppm = map(analogRead(PIN_MQ135), 0, 4095, 0, 1000);
+  jarak_cm  = map(analogRead(PIN_TOF), 0, 4095, 0, 200);
 
-  char buffer[320];
-  serializeJson(doc, buffer);
-  mqttClient.publish(MQTT_TOPIC, buffer);
+  float t = dht.readTemperature();
+  float h = dht.readHumidity();
+  if (!isnan(t)) suhu = t;
+  if (!isnan(h)) kelembapan = h;
+
+  // Evaluasi status seluruh sensor
+  if (mq4_ppm >= MQ4_BAHAYA || mq135_ppm >= MQ135_BAHAYA || suhu >= SUHU_MAX) {
+    statusSensor = "BAHAYA";
+    tone(PIN_BUZZER, 2000);
+    // Fail-safe: kunci pintu segera jika kondisi menjadi BAHAYA
+    if (isDoorOpen) {
+      isDoorOpen = false;
+      digitalWrite(PIN_DOOR, LOW);
+      doorStatus = "LOCKED";
+      Serial.println("[DARURAT] Gas berbahaya! Pintu dikunci otomatis.");
+    }
+  } else if (mq4_ppm >= MQ4_WASPADA || mq135_ppm >= MQ135_WASPADA) {
+    statusSensor = "WASPADA";
+    tone(PIN_BUZZER, 1000, 200);
+  } else {
+    statusSensor = "NORMAL";
+    noTone(PIN_BUZZER);
+  }
 }
 
-// ======================== SETUP & LOOP =======================================
-void setup() {
-  Serial.begin(115200);
-  pinMode(PIN_BUZZER, OUTPUT);
-  digitalWrite(PIN_BUZZER, LOW);
-  pinMode(PIN_RELAY_DOOR, OUTPUT);
-  digitalWrite(PIN_RELAY_DOOR, LOW);
+void kirimMQTT(bool rfidEvent) {
+  StaticJsonDocument<256> doc;
+  doc["node_id"]    = node_id;
+  doc["mq4"]        = mq4_ppm;
+  doc["mq135"]      = mq135_ppm;
+  doc["suhu"]       = round(suhu * 10) / 10.0;
+  doc["kelembapan"] = round(kelembapan * 10) / 10.0;
+  doc["jarak"]      = jarak_cm;
+  doc["rfid"]       = rfidEvent;
+  doc["status"]     = statusSensor;
+  doc["door"]       = doorStatus;
 
-  Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  tofReady = tof.begin();
-  if (!tofReady) {
-    Serial.println("[PCB1] Peringatan: TOF200C (VL53L0X) tidak terdeteksi di I2C!");
+  char buffer[256];
+  serializeJson(doc, buffer);
+  client.publish(mqtt_topic, buffer);
+  Serial.print("Kirim MQTT: ");
+  Serial.println(buffer);
+}
+
+void cekDanCatatPeringatanSupabase() {
+  if (statusSensor == "NORMAL" || statusSensor == prevSupabaseStatus) return;
+
+  if (mq4_ppm >= MQ4_BAHAYA) {
+    kirimAlertKeSupabase("MQ-4", mq4_ppm, MQ4_BAHAYA, "BAHAYA");
+  } else if (mq4_ppm >= MQ4_WASPADA) {
+    kirimAlertKeSupabase("MQ-4", mq4_ppm, MQ4_WASPADA, "WASPADA");
   }
 
-  dht.begin();
-  SPI.begin();
-  rfid.PCD_Init();
+  if (mq135_ppm >= MQ135_BAHAYA) {
+    kirimAlertKeSupabase("MQ-135", mq135_ppm, MQ135_BAHAYA, "BAHAYA");
+  } else if (mq135_ppm >= MQ135_WASPADA) {
+    kirimAlertKeSupabase("MQ-135", mq135_ppm, MQ135_WASPADA, "WASPADA");
+  }
 
-  connectWiFi();
-  mqttClient.setServer(MQTT_BROKER, MQTT_PORT);
-  connectMQTT();
+  if (suhu >= SUHU_MAX) {
+    kirimAlertKeSupabase("DHT11 - Suhu", suhu, SUHU_MAX, "BAHAYA");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  dht.begin();
+
+  pinMode(PIN_BUZZER, OUTPUT);
+  pinMode(PIN_RFID, INPUT_PULLUP);
+  pinMode(PIN_DOOR, OUTPUT);
+  digitalWrite(PIN_DOOR, LOW); // Kondisi awal pintu terkunci
+
+  setup_wifi();
+  client.setServer(mqtt_server, mqtt_port);
 }
 
 void loop() {
-  connectWiFi();
-  if (!mqttClient.connected()) connectMQTT();
-  mqttClient.loop();
-
-  unsigned long now = millis();
-
-  if (isDoorOpen && (now - doorOpenedAtMs >= DOOR_OPEN_MS)) {
-    isDoorOpen = false;
-    digitalWrite(PIN_RELAY_DOOR, LOW);
+  if (!client.connected()) {
+    reconnect_mqtt();
   }
+  client.loop();
 
-  float mq4        = readMqPpm(PIN_MQ4, 2000.0f);
-  float mq135      = readMqPpm(PIN_MQ135, 1000.0f);
-  float suhu       = dht.readTemperature();
-  float kelembapan = dht.readHumidity();
-  if (isnan(suhu)) suhu = 26.0f;
-  if (isnan(kelembapan)) kelembapan = 60.0f;
-  int jarakCm      = readTofDistanceCm();
-  int battery      = readBatteryPercent();
+  // 1. Cek tombol RFID setiap saat (real-time, tidak menunggu jeda 2 detik)
+  bool currentRfidState = digitalRead(PIN_RFID);
+  if (lastRfidState == HIGH && currentRfidState == LOW) {
+    bacaDanEvaluasiSensor();
 
-  String sMq4    = evalLevel(mq4, MQ4_WARNING, MQ4_DANGER);
-  String sMq135  = evalLevel(mq135, MQ135_WARNING, MQ135_DANGER);
-  String sTemp   = evalLevel(suhu, TEMP_WARNING, TEMP_DANGER);
-  String sHum    = evalLevel(kelembapan, HUM_WARNING, HUM_DANGER);
-  String overall = highestStatus(sMq4, sMq135, sTemp, sHum);
-
-  updateAlarmBuzzer(overall, now);
-
-  bool rfidTapped = false;
-  if (rfid.PICC_IsNewCardPresent() && rfid.PICC_ReadCardSerial()) {
-    rfidTapped = true;
-    bool gasSafe = (sMq4 != "BAHAYA" && sMq135 != "BAHAYA");
-
-    if (gasSafe) {
+    if (statusSensor == "NORMAL") {
+      // Semua sensor aman -> Buka pintu
       isDoorOpen = true;
-      doorOpenedAtMs = now;
-      digitalWrite(PIN_RELAY_DOOR, HIGH);
-      beepRfidFeedback(true);
-      logRfidToSupabase("OPEN", "DITERIMA");
+      doorOpenTime = millis();
+      digitalWrite(PIN_DOOR, HIGH);
+      doorStatus = "OPEN";
+      tone(PIN_BUZZER, 1500, 150); // Bip konfirmasi akses diterima
+      Serial.println("[RFID] Kondisi AMAN -> PINTU DIBUKA (5 detik)");
+      kirimRfidKeSupabase("OPEN", "DITERIMA");
     } else {
+      // Kondisi WASPADA / BAHAYA -> Kunci pintu & tolak akses
       isDoorOpen = false;
-      digitalWrite(PIN_RELAY_DOOR, LOW);
-      beepRfidFeedback(false);
-      logRfidToSupabase("LOCKED", "DITOLAK");
+      digitalWrite(PIN_DOOR, LOW);
+      doorStatus = "LOCKED";
+      tone(PIN_BUZZER, 400, 500); // Nada rendah akses ditolak
+      Serial.println("[RFID] Kondisi BERBAHAYA -> AKSES DITOLAK, PINTU TETAP TERKUNCI!");
+      kirimRfidKeSupabase("LOCKED", "DITOLAK");
     }
+    kirimMQTT(true);
+    delay(250); // Debounce tombol
+  }
+  lastRfidState = currentRfidState;
 
-    String doorStr = isDoorOpen ? "OPEN" : "LOCKED";
-    publishTelemetryMqtt(mq4, mq135, suhu, kelembapan, jarakCm, true, doorStr, battery, overall);
-
-    rfid.PICC_HaltA();
-    rfid.PCD_StopCrypto1();
+  // 2. Auto-lock pintu setelah 5 detik terbuka
+  if (isDoorOpen && (millis() - doorOpenTime >= 5000)) {
+    isDoorOpen = false;
+    digitalWrite(PIN_DOOR, LOW);
+    doorStatus = "LOCKED";
+    Serial.println("[AUTO-LOCK] Pintu terkunci kembali.");
+    kirimMQTT(false);
   }
 
-  String doorStr = isDoorOpen ? "OPEN" : "LOCKED";
+  // 3. Kirim telemetri rutin setiap 2 detik ke MQTT
+  if (millis() - lastSend >= 2000) {
+    lastSend = millis();
+    bacaDanEvaluasiSensor();
+    kirimMQTT(false);
 
-  if (sMq4 != "NORMAL" && sMq4 != prevMq4Status) {
-    logAlertToSupabase("MQ-4", mq4, sMq4 == "BAHAYA" ? MQ4_DANGER : MQ4_WARNING, sMq4);
+    // 4. Simpan ke Supabase tiap 15 detik atau saat status berubah
+    bool statusChanged = (statusSensor != prevSupabaseStatus);
+    if (statusChanged || (millis() - lastSupabaseSend >= SUPABASE_INTERVAL_MS)) {
+      lastSupabaseSend = millis();
+      cekDanCatatPeringatanSupabase();
+      prevSupabaseStatus = statusSensor;
+      kirimSensorKeSupabase();
+    }
   }
-  if (sMq135 != "NORMAL" && sMq135 != prevMq135Status) {
-    logAlertToSupabase("MQ-135", mq135, sMq135 == "BAHAYA" ? MQ135_DANGER : MQ135_WARNING, sMq135);
-  }
-  if (sTemp != "NORMAL" && sTemp != prevTempStatus) {
-    logAlertToSupabase("DHT11 - Suhu", suhu, sTemp == "BAHAYA" ? TEMP_DANGER : TEMP_WARNING, sTemp);
-  }
-  if (sHum != "NORMAL" && sHum != prevHumStatus) {
-    logAlertToSupabase("DHT11 - Kelembapan", kelembapan, sHum == "BAHAYA" ? HUM_DANGER : HUM_WARNING, sHum);
-  }
-  prevMq4Status   = sMq4;
-  prevMq135Status = sMq135;
-  prevTempStatus  = sTemp;
-  prevHumStatus   = sHum;
-
-  if (!rfidTapped && (now - lastMqttSentMs >= MQTT_INTERVAL_MS)) {
-    lastMqttSentMs = now;
-    publishTelemetryMqtt(mq4, mq135, suhu, kelembapan, jarakCm, false, doorStr, battery, overall);
-  }
-
-  bool statusChanged = (overall != prevOverallStatus);
-  if (statusChanged || (now - lastSupabaseSentMs >= SUPABASE_INTERVAL_MS)) {
-    lastSupabaseSentMs = now;
-    prevOverallStatus = overall;
-    logSensorToSupabase(mq4, mq135, suhu, kelembapan, jarakCm, doorStr, overall);
-  }
-
-  delay(100);
 }

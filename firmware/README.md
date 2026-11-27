@@ -1,29 +1,20 @@
 # Firmware ESP32 — MUT-IKN Monitor (2 PCB)
 
-Skematik perangkat keras dibagi menjadi 2 modul PCB:
+Firmware disesuaikan dengan skematik & pemetaan pin Wokwi / ESP32 Anda:
 
-## 1. PCB 1 — Node Sensor & Akses (`firmware/pcb1_sensor_node/pcb1_sensor_node.ino`)
-Berisi: **ESP32, TOF200C (I2C VL53L0X), MQ-4, MQ-135, DHT11, RFID RC522, Buzzer, dan Baterai**.
-
-| Komponen | Pin Default di Sketch | Keterangan |
+## 1. PCB 1 — Node Sensor & Akses (`pcb1_sensor_node/pcb1_sensor_node.ino`)
+| Komponen | Pin ESP32 | Keterangan |
 |---|---|---|
-| MQ-4 | `GPIO 34` | Analog input (ADC1) |
-| MQ-135 | `GPIO 35` | Analog input (ADC1) |
-| Baterai (ADC) | `GPIO 32` | Pembagi tegangan baterai |
-| DHT11 | `GPIO 4` | Data digital |
-| TOF200C (I2C) | `SDA=21`, `SCL=22` | Alamat I2C `0x29` (`Adafruit_VL53L0X`) |
-| RFID RC522 (SPI) | `SS=5`, `RST=27`, `SCK=18`, `MISO=19`, `MOSI=23` | Modul pembaca kartu RFID |
-| Buzzer | `GPIO 25` | Alarm gas & nada konfirmasi RFID |
+| MQ-4 | `GPIO 34` | Analog input (`0..2000 ppm`) |
+| MQ-135 | `GPIO 35` | Analog input (`0..1000 ppm`) |
+| DHT22 / DHT11 | `GPIO 32` | Wokwi pakai `DHT22`; ganti `#define DHTTYPE DHT11` di hardware fisik |
+| TOF200C | `GPIO 33` | Analog input (`0..200 cm`) |
+| Buzzer | `GPIO 25` | `tone()` alarm & nada akses RFID |
+| RFID | `GPIO 5` | `INPUT_PULLUP` tombol trigger simulasi RFID |
+| Relay / LED Pintu | `GPIO 26` | `HIGH` (`OPEN` 5 detik) / `LOW` (`LOCKED`) |
 
-- Mengirim telemetri MQTT real-time setiap **2 detik** ke `broker.emqx.io:1883` (`ikn/mut/NODE-01` s/d `NODE-04`).
-- Mengirim HTTP `POST` langsung ke Supabase (`sensor_logs`, `alert_logs`, `rfid_logs`) agar database tetap terisi **24/7 meskipun dashboard web tidak dibuka**.
+- **MQTT Live:** Publish JSON tiap **2 detik** ke `broker.emqx.io:1883` topik `ikn/mut/node01`.
+- **Supabase 24/7:** Mengirim HTTP `POST` ke `sensor_logs` (tiap 15 detik atau saat status berubah), `alert_logs` (saat `WASPADA`/`BAHAYA`), dan `rfid_logs` (saat RFID di-tap).
 
-## 2. PCB 2 — Display Monitor LCD (`firmware/pcb2_lcd_display/pcb2_lcd_display.ino`)
-Berisi: **ESP32, LCD I2C, dan Baterai**.
-
-| Komponen | Pin Default di Sketch | Keterangan |
-|---|---|---|
-| LCD I2C (16x2 / 20x4) | `SDA=21`, `SCL=22` | Alamat default `0x27` (`LiquidCrystal_I2C`) |
-| Baterai (ADC) | `GPIO 34` | Pembacaan daya baterai PCB 2 |
-
-- Melakukan subscribe ke topik `ikn/mut/+` dari broker EMQX yang sama, otomatis memprioritaskan node berstatus `BAHAYA` / `WASPADA` di layar LCD, dan merotasi tampilan node tiap 3 detik saat kondisi normal.
+## 2. PCB 2 — Unit Monitor LCD (`pcb2_lcd_display/pcb2_lcd_display.ino`)
+- Subscribe MQTT `ikn/mut/node01` dan menampilkan `Q4:... Q135:...` serta `STATUS | DOOR` pada LCD I2C `16x2` (`0x27`).
