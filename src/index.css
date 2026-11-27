@@ -82,3 +82,7 @@
   color: #1E293B;
   padding: 6px 8px;
 }
+
+.leaflet-tile-pane {
+  filter: saturate(0.55) brightness(1.04) contrast(0.96);
+}
