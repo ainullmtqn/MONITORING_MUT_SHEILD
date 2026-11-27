@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import mqtt, { MqttClient } from 'mqtt';
 import {
   DEFAULT_THRESHOLDS,
   MAX_ALERT_LOGS,
   MAX_HISTORY_POINTS,
-  POLL_INTERVAL_MS,
+  MQTT_BROKER_URL,
+  MQTT_TOPIC,
   SENSOR_METADATA,
   SENSOR_NODES,
   SENSOR_ORDER,
@@ -15,213 +17,106 @@ import {
 } from '../constants/sensors';
 import {
   AlertLogEntry,
+  MqttSensorPayload,
   PeakReadingsMap,
   SensorKey,
   SensorNodeConfig,
   SensorNodeState,
-  SensorReadingValues,
   SensorStatus,
   TelemetryPoint,
   ThresholdMap,
 } from '../types/sensor';
 
-interface NodeSimulatorState {
-  values: SensorReadingValues;
-  spikeSensor: SensorKey | null;
-  spikeTicksRemaining: number;
-  spikeLevel: 'warning' | 'danger';
-}
-
-interface MultiNodeSimulator {
-  tick: number;
-  byNode: Record<string, NodeSimulatorState>;
+function createEmptyPoint(): TelemetryPoint {
+  return {
+    mq4: 0,
+    mq135: 0,
+    temperature: 0,
+    humidity: 0,
+    timestamp: '--:--:--',
+    epochMs: 0,
+  };
 }
 
 function clamp(val: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, val));
 }
 
-function roundTo(val: number, decimals: number): number {
-  const factor = Math.pow(10, decimals);
-  return Math.round(val * factor) / factor;
+function toValidNumber(raw: unknown, min: number, max: number): number | null {
+  if (typeof raw !== 'number' && typeof raw !== 'string') return null;
+  if (typeof raw === 'string' && raw.trim() === '') return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return null;
+  return clamp(parsed, min, max);
 }
 
-function buildInitialNodeHistory(node: SensorNodeConfig): TelemetryPoint[] {
-  const now = Date.now();
-  const points: TelemetryPoint[] = [];
-  let current = { ...node.baseline };
+function resolveTargetNode(
+  payload: MqttSensorPayload,
+  topic: string
+): SensorNodeConfig | undefined {
+  const topicSegment = topic.split('/').pop()?.trim().toUpperCase() ?? '';
+  const payloadId =
+    typeof payload.node_id === 'string'
+      ? payload.node_id.trim().toUpperCase()
+      : '';
+  const candidate = payloadId || topicSegment;
 
-  for (let i = 11; i >= 0; i--) {
-    const ts = new Date(now - i * POLL_INTERVAL_MS);
-    current = {
-      mq4: roundTo(clamp(current.mq4 + (Math.random() - 0.48) * 28, 120, 440), 0),
-      mq135: roundTo(clamp(current.mq135 + (Math.random() - 0.48) * 18, 100, 310), 0),
-      temperature: roundTo(
-        clamp(current.temperature + (Math.random() - 0.5) * 0.5, 22.5, 30.8),
-        1
-      ),
-      humidity: roundTo(
-        clamp(current.humidity + (Math.random() - 0.5) * 1.3, 52.0, 72.0),
-        1
-      ),
-    };
-    points.push({
-      ...current,
-      epochMs: ts.getTime(),
-      timestamp: formatTimestamp(ts),
-    });
-  }
-
-  return points;
+  return SENSOR_NODES.find(
+    (node) =>
+      node.code.toUpperCase() === candidate ||
+      node.id.toUpperCase() === candidate
+  );
 }
 
-/**
- * Standalone multi-node subsurface MUT telemetry fetcher.
- * Replace the body of `fetchLatestNodeReadings` with a `fetch()` call to an
- * ESP32 / LoRaWAN / RS-485 gateway REST API, WebSocket, or MQTT HTTP bridge
- * when integrating field hardware in the IKN Multi-Utility Tunnel.
- */
-export async function fetchLatestNodeReadings(
-  sim: MultiNodeSimulator,
-  nodes: SensorNodeConfig[],
-  thresholds: ThresholdMap
-): Promise<Record<string, TelemetryPoint>> {
-  sim.tick += 1;
+function buildPeakSnapshot(
+  latestByNode: Record<string, TelemetryPoint>,
+  receivedNodeIds: Set<string>,
+  timestamp: string,
+  epochMs: number
+): TelemetryPoint {
+  const activeNodes = SENSOR_NODES.filter((n) => receivedNodeIds.has(n.id));
+  const pool = activeNodes.length > 0 ? activeNodes : SENSOR_NODES;
+  const firstNode = pool[0];
+  const firstPt = latestByNode[firstNode.id];
+  const firstTag = formatNodeLocationTag(firstNode);
 
-  if (sim.tick === 2 || sim.tick % 5 === 0) {
-    const activeSpikes = nodes.filter(
-      (n) => sim.byNode[n.id].spikeTicksRemaining > 0
-    );
-    if (activeSpikes.length < 2) {
-      const targetNode = nodes[Math.floor(Math.random() * nodes.length)];
-      const nodeSim = sim.byNode[targetNode.id];
-      if (nodeSim.spikeTicksRemaining <= 0) {
-        const weightedSensors: SensorKey[] = [
-          'mq4',
-          'mq4',
-          'mq135',
-          'mq135',
-          'temperature',
-          'humidity',
-        ];
-        nodeSim.spikeSensor =
-          weightedSensors[Math.floor(Math.random() * weightedSensors.length)];
-        nodeSim.spikeTicksRemaining = 3 + Math.floor(Math.random() * 3);
-        nodeSim.spikeLevel = Math.random() > 0.48 ? 'danger' : 'warning';
-      }
+  const snapshot: TelemetryPoint = {
+    mq4: firstPt.mq4,
+    mq135: firstPt.mq135,
+    temperature: firstPt.temperature,
+    humidity: firstPt.humidity,
+    timestamp,
+    epochMs,
+    mq4Source: firstTag,
+    mq135Source: firstTag,
+    temperatureSource: firstTag,
+    humiditySource: firstTag,
+  };
+
+  for (let i = 1; i < pool.length; i++) {
+    const node = pool[i];
+    const pt = latestByNode[node.id];
+    const tag = formatNodeLocationTag(node);
+
+    if (pt.mq4 > snapshot.mq4) {
+      snapshot.mq4 = pt.mq4;
+      snapshot.mq4Source = tag;
+    }
+    if (pt.mq135 > snapshot.mq135) {
+      snapshot.mq135 = pt.mq135;
+      snapshot.mq135Source = tag;
+    }
+    if (pt.temperature > snapshot.temperature) {
+      snapshot.temperature = pt.temperature;
+      snapshot.temperatureSource = tag;
+    }
+    if (pt.humidity > snapshot.humidity) {
+      snapshot.humidity = pt.humidity;
+      snapshot.humiditySource = tag;
     }
   }
 
-  const now = new Date();
-  const timestamp = formatTimestamp(now);
-  const epochMs = now.getTime();
-  const readings: Record<string, TelemetryPoint> = {};
-
-  for (const node of nodes) {
-    const nodeSim = sim.byNode[node.id];
-    const next: SensorReadingValues = { ...nodeSim.values };
-
-    for (const key of SENSOR_ORDER) {
-      const meta = SENSOR_METADATA[key];
-      const isSpike =
-        nodeSim.spikeSensor === key && nodeSim.spikeTicksRemaining > 0;
-
-      if (isSpike) {
-        const th = thresholds[key];
-        const targetPeak =
-          nodeSim.spikeLevel === 'danger'
-            ? th.danger + (meta.max - th.danger) * 0.24
-            : th.warning + (th.danger - th.warning) * 0.55;
-        const delta =
-          (targetPeak - next[key]) * 0.62 +
-          (Math.random() - 0.35) * meta.step * 0.4;
-        next[key] = roundTo(clamp(next[key] + delta, meta.min, meta.max), meta.decimals);
-      } else {
-        const pull = (node.baseline[key] - next[key]) * 0.28;
-        const jitterScale =
-          key === 'mq4'
-            ? 30
-            : key === 'mq135'
-              ? 20
-              : key === 'temperature'
-                ? 0.6
-                : 1.6;
-        const noise = (Math.random() - 0.5) * jitterScale;
-        next[key] = roundTo(clamp(next[key] + pull + noise, meta.min, meta.max), meta.decimals);
-      }
-    }
-
-    if (nodeSim.spikeTicksRemaining > 0) {
-      nodeSim.spikeTicksRemaining -= 1;
-      if (nodeSim.spikeTicksRemaining === 0) {
-        nodeSim.spikeSensor = null;
-      }
-    }
-
-    nodeSim.values = next;
-    readings[node.id] = {
-      ...next,
-      epochMs,
-      timestamp,
-    };
-  }
-
-  return readings;
-}
-
-function buildPeakHistory(
-  historiesByNode: Record<string, TelemetryPoint[]>,
-  nodes: SensorNodeConfig[]
-): TelemetryPoint[] {
-  const sampleLen = historiesByNode[nodes[0].id]?.length ?? 0;
-  const peakPoints: TelemetryPoint[] = [];
-
-  for (let i = 0; i < sampleLen; i++) {
-    const firstNode = nodes[0];
-    const first = historiesByNode[firstNode.id][i];
-    const firstTag = formatNodeLocationTag(firstNode);
-
-    const peakPoint: TelemetryPoint = {
-      mq4: first.mq4,
-      mq135: first.mq135,
-      temperature: first.temperature,
-      humidity: first.humidity,
-      timestamp: first.timestamp,
-      epochMs: first.epochMs,
-      mq4Source: firstTag,
-      mq135Source: firstTag,
-      temperatureSource: firstTag,
-      humiditySource: firstTag,
-    };
-
-    for (let nIdx = 1; nIdx < nodes.length; nIdx++) {
-      const node = nodes[nIdx];
-      const pt = historiesByNode[node.id][i];
-      if (!pt) continue;
-      const tag = formatNodeLocationTag(node);
-
-      if (pt.mq4 > peakPoint.mq4) {
-        peakPoint.mq4 = pt.mq4;
-        peakPoint.mq4Source = tag;
-      }
-      if (pt.mq135 > peakPoint.mq135) {
-        peakPoint.mq135 = pt.mq135;
-        peakPoint.mq135Source = tag;
-      }
-      if (pt.temperature > peakPoint.temperature) {
-        peakPoint.temperature = pt.temperature;
-        peakPoint.temperatureSource = tag;
-      }
-      if (pt.humidity > peakPoint.humidity) {
-        peakPoint.humidity = pt.humidity;
-        peakPoint.humiditySource = tag;
-      }
-    }
-
-    peakPoints.push(peakPoint);
-  }
-
-  return peakPoints;
+  return snapshot;
 }
 
 export interface UseSensorStreamResult {
@@ -246,19 +141,20 @@ export function useSensorStream(
   const initialHistories = useMemo(() => {
     const map: Record<string, TelemetryPoint[]> = {};
     for (const node of SENSOR_NODES) {
-      map[node.id] = buildInitialNodeHistory(node);
+      map[node.id] = [createEmptyPoint()];
     }
     return map;
   }, []);
 
   const [historiesByNode, setHistoriesByNode] =
     useState<Record<string, TelemetryPoint[]>>(initialHistories);
+  const [peakHistory, setPeakHistory] = useState<TelemetryPoint[]>([]);
   const [thresholds, setThresholds] = useState<ThresholdMap>(DEFAULT_THRESHOLDS);
   const [alertLogs, setAlertLogs] = useState<AlertLogEntry[]>([]);
-  const [isConnected, setIsConnected] = useState<boolean>(true);
-  const [sampleCount, setSampleCount] = useState<number>(
-    initialHistories[SENSOR_NODES[0].id].length
-  );
+  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [sampleCount, setSampleCount] = useState<number>(0);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('--:--:--');
+  const [receivedIdsSnapshot, setReceivedIdsSnapshot] = useState<string[]>([]);
 
   const thresholdsRef = useRef<ThresholdMap>(thresholds);
   thresholdsRef.current = thresholds;
@@ -266,29 +162,10 @@ export function useSensorStream(
   const onAlertStatusRef = useRef(onAlertStatus);
   onAlertStatusRef.current = onAlertStatus;
 
-  const simRef = useRef<MultiNodeSimulator>({
-    tick: 0,
-    byNode: Object.fromEntries(
-      SENSOR_NODES.map((node) => {
-        const hist = initialHistories[node.id];
-        const last = hist[hist.length - 1];
-        return [
-          node.id,
-          {
-            values: {
-              mq4: last.mq4,
-              mq135: last.mq135,
-              temperature: last.temperature,
-              humidity: last.humidity,
-            },
-            spikeSensor: null,
-            spikeTicksRemaining: 0,
-            spikeLevel: 'warning' as const,
-          },
-        ];
-      })
-    ),
-  });
+  const receivedNodesRef = useRef<Set<string>>(new Set());
+  const latestByNodeRef = useRef<Record<string, TelemetryPoint>>(
+    Object.fromEntries(SENSOR_NODES.map((node) => [node.id, createEmptyPoint()]))
+  );
 
   const prevStatusRef = useRef<Record<string, Record<SensorKey, SensorStatus>>>(
     Object.fromEntries(
@@ -300,99 +177,191 @@ export function useSensorStream(
   );
 
   useEffect(() => {
-    let cancelled = false;
+    let disposed = false;
 
-    const poll = async () => {
-      try {
-        const readings = await fetchLatestNodeReadings(
-          simRef.current,
-          SENSOR_NODES,
-          thresholdsRef.current
-        );
-        if (cancelled) return;
+    const client: MqttClient = mqtt.connect(MQTT_BROKER_URL, {
+      clientId: `mut-ikn-web-${Math.random().toString(16).slice(2, 10)}`,
+      clean: true,
+      reconnectPeriod: 3000,
+      connectTimeout: 10000,
+      keepalive: 30,
+    });
 
-        setIsConnected(true);
-        setSampleCount((c) => c + 1);
-        setHistoriesByNode((prev) => {
-          const updated: Record<string, TelemetryPoint[]> = {};
-          for (const node of SENSOR_NODES) {
-            const point = readings[node.id];
-            updated[node.id] = [
-              ...(prev[node.id] ?? []).slice(-(MAX_HISTORY_POINTS - 1)),
-              point,
-            ];
-          }
-          return updated;
-        });
-
-        const newEntries: AlertLogEntry[] = [];
-        let highestStatus: SensorStatus = 'normal';
-
-        for (const node of SENSOR_NODES) {
-          const point = readings[node.id];
-          for (const key of SENSOR_ORDER) {
-            const val = point[key];
-            const th = thresholdsRef.current[key];
-            const status = evaluateSensorStatus(val, th);
-
-            if (STATUS_PRIORITY[status] > STATUS_PRIORITY[highestStatus]) {
-              highestStatus = status;
-            }
-
-            const prevStatus = prevStatusRef.current[node.id][key];
-            const shouldLog =
-              status !== 'normal' &&
-              (prevStatus !== status || status === 'danger');
-
-            if (shouldLog) {
-              const meta = SENSOR_METADATA[key];
-              newEntries.push({
-                id: `${point.epochMs}-${node.id}-${key}-${Math.random().toString(36).slice(2, 6)}`,
-                timestamp: point.timestamp,
-                nodeId: node.id,
-                nodeCode: node.code,
-                nodeName: node.name,
-                nodeLocationTag: formatNodeLocationTag(node),
-                sensorKey: key,
-                sensorName: meta.label,
-                value: val,
-                unit: meta.unit,
-                thresholdValue: status === 'danger' ? th.danger : th.warning,
-                status,
-              });
-            }
-
-            prevStatusRef.current[node.id][key] = status;
-          }
-        }
-
-        if (newEntries.length > 0) {
-          setAlertLogs((prev) => [...newEntries, ...prev].slice(0, MAX_ALERT_LOGS));
-        }
-
-        if (highestStatus !== 'normal') {
-          onAlertStatusRef.current?.(highestStatus);
-        }
-      } catch {
-        if (!cancelled) {
+    client.on('connect', () => {
+      if (disposed) return;
+      setIsConnected(true);
+      client.subscribe(MQTT_TOPIC, { qos: 0 }, (err) => {
+        if (err && !disposed) {
           setIsConnected(false);
         }
-      }
-    };
+      });
+    });
 
-    const intervalId = window.setInterval(() => {
-      void poll();
-    }, POLL_INTERVAL_MS);
+    client.on('reconnect', () => {
+      if (!disposed) setIsConnected(false);
+    });
+
+    client.on('offline', () => {
+      if (!disposed) setIsConnected(false);
+    });
+
+    client.on('close', () => {
+      if (!disposed) setIsConnected(false);
+    });
+
+    client.on('error', () => {
+      if (!disposed) setIsConnected(false);
+    });
+
+    client.on('message', (topic, messageBuffer) => {
+      if (disposed) return;
+
+      let payload: MqttSensorPayload;
+      try {
+        payload = JSON.parse(messageBuffer.toString()) as MqttSensorPayload;
+      } catch {
+        return;
+      }
+
+      const targetNode = resolveTargetNode(payload, topic);
+      if (!targetNode) return;
+
+      const mq4 = toValidNumber(
+        payload.mq4,
+        SENSOR_METADATA.mq4.min,
+        SENSOR_METADATA.mq4.max
+      );
+      const mq135 = toValidNumber(
+        payload.mq135,
+        SENSOR_METADATA.mq135.min,
+        SENSOR_METADATA.mq135.max
+      );
+      const temperature = toValidNumber(
+        payload.suhu,
+        SENSOR_METADATA.temperature.min,
+        SENSOR_METADATA.temperature.max
+      );
+      const humidity = toValidNumber(
+        payload.kelembapan,
+        SENSOR_METADATA.humidity.min,
+        SENSOR_METADATA.humidity.max
+      );
+
+      if (
+        mq4 === null ||
+        mq135 === null ||
+        temperature === null ||
+        humidity === null
+      ) {
+        return;
+      }
+
+      const now = new Date();
+      const timestamp = formatTimestamp(now);
+      const epochMs = now.getTime();
+
+      const point: TelemetryPoint = {
+        mq4,
+        mq135,
+        temperature,
+        humidity,
+        timestamp,
+        epochMs,
+        jarak: typeof payload.jarak === 'number' ? payload.jarak : undefined,
+        rfid: typeof payload.rfid === 'boolean' ? payload.rfid : undefined,
+        deviceStatus: typeof payload.status === 'string' ? payload.status : undefined,
+      };
+
+      const isFirstForNode = !receivedNodesRef.current.has(targetNode.id);
+      if (isFirstForNode) {
+        receivedNodesRef.current.add(targetNode.id);
+        setReceivedIdsSnapshot(Array.from(receivedNodesRef.current));
+      }
+
+      latestByNodeRef.current[targetNode.id] = point;
+
+      setIsConnected(true);
+      setSampleCount((c) => c + 1);
+      setLastUpdatedAt(timestamp);
+
+      setHistoriesByNode((prev) => {
+        const currentList = prev[targetNode.id] ?? [];
+        const nextList = isFirstForNode
+          ? [point]
+          : [...currentList.slice(-(MAX_HISTORY_POINTS - 1)), point];
+        return {
+          ...prev,
+          [targetNode.id]: nextList,
+        };
+      });
+
+      const peakSnapshot = buildPeakSnapshot(
+        latestByNodeRef.current,
+        receivedNodesRef.current,
+        timestamp,
+        epochMs
+      );
+      setPeakHistory((prev) => [
+        ...prev.slice(-(MAX_HISTORY_POINTS - 1)),
+        peakSnapshot,
+      ]);
+
+      const newEntries: AlertLogEntry[] = [];
+      let highestStatus: SensorStatus = 'normal';
+
+      for (const key of SENSOR_ORDER) {
+        const val = point[key];
+        const th = thresholdsRef.current[key];
+        const status = evaluateSensorStatus(val, th);
+
+        if (STATUS_PRIORITY[status] > STATUS_PRIORITY[highestStatus]) {
+          highestStatus = status;
+        }
+
+        const prevStatus = prevStatusRef.current[targetNode.id][key];
+        const shouldLog =
+          status !== 'normal' && (prevStatus !== status || status === 'danger');
+
+        if (shouldLog) {
+          const meta = SENSOR_METADATA[key];
+          newEntries.push({
+            id: `${epochMs}-${targetNode.id}-${key}-${Math.random().toString(36).slice(2, 6)}`,
+            timestamp,
+            nodeId: targetNode.id,
+            nodeCode: targetNode.code,
+            nodeName: targetNode.name,
+            nodeLocationTag: formatNodeLocationTag(targetNode),
+            sensorKey: key,
+            sensorName: meta.label,
+            value: val,
+            unit: meta.unit,
+            thresholdValue: status === 'danger' ? th.danger : th.warning,
+            status,
+          });
+        }
+
+        prevStatusRef.current[targetNode.id][key] = status;
+      }
+
+      if (newEntries.length > 0) {
+        setAlertLogs((prev) => [...newEntries, ...prev].slice(0, MAX_ALERT_LOGS));
+      }
+
+      if (highestStatus !== 'normal') {
+        onAlertStatusRef.current?.(highestStatus);
+      }
+    });
 
     return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
+      disposed = true;
+      client.removeAllListeners();
+      client.end(true);
     };
   }, []);
 
   const nodes = useMemo<SensorNodeState[]>(() => {
     return SENSOR_NODES.map((config) => {
-      const history = historiesByNode[config.id] ?? [];
+      const history = historiesByNode[config.id] ?? [createEmptyPoint()];
       const latest = history[history.length - 1];
       const statuses: Record<SensorKey, SensorStatus> = {
         mq4: evaluateSensorStatus(latest.mq4, thresholds.mq4),
@@ -422,12 +391,16 @@ export function useSensorStream(
   }, [nodes]);
 
   const peakReadings = useMemo<PeakReadingsMap>(() => {
+    const receivedSet = new Set(receivedIdsSnapshot);
+    const activePool = nodes.filter((n) => receivedSet.has(n.config.id));
+    const pool = activePool.length > 0 ? activePool : nodes;
+
     const result = {} as PeakReadingsMap;
     for (const key of SENSOR_ORDER) {
-      let bestNode = nodes[0];
-      for (let i = 1; i < nodes.length; i++) {
-        if (nodes[i].latest[key] > bestNode.latest[key]) {
-          bestNode = nodes[i];
+      let bestNode = pool[0];
+      for (let i = 1; i < pool.length; i++) {
+        if (pool[i].latest[key] > bestNode.latest[key]) {
+          bestNode = pool[i];
         }
       }
       result[key] = {
@@ -437,11 +410,7 @@ export function useSensorStream(
       };
     }
     return result;
-  }, [nodes]);
-
-  const peakHistory = useMemo<TelemetryPoint[]>(() => {
-    return buildPeakHistory(historiesByNode, SENSOR_NODES);
-  }, [historiesByNode]);
+  }, [nodes, receivedIdsSnapshot]);
 
   const overallStatus = useMemo<SensorStatus>(() => {
     return getHighestStatus(nodes.map((n) => n.overallStatus));
@@ -458,8 +427,6 @@ export function useSensorStream(
   const clearAlertLogs = useCallback(() => {
     setAlertLogs([]);
   }, []);
-
-  const lastUpdatedAt = nodes[0]?.latest.timestamp ?? '--:--:--';
 
   return {
     nodes,

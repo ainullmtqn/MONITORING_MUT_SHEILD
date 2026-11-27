@@ -69,7 +69,7 @@ export function Header({
                 ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]'
                 : 'bg-[#FEF2F2] border-[#FECACA] text-[#B91C1C]'
             }`}
-            title="Status aliran telemetri real-time (interval 2 detik)"
+            title="Status koneksi MQTT Live WebSocket (wss://broker.emqx.io:8084/mqtt)"
           >
             <span
               className={`w-2 h-2 rounded-full ${

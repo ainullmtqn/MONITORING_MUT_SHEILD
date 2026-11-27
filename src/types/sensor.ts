@@ -35,9 +35,23 @@ export interface SensorReadingValues {
   humidity: number;
 }
 
+export interface MqttSensorPayload {
+  node_id?: string;
+  mq4?: number;
+  mq135?: number;
+  suhu?: number;
+  kelembapan?: number;
+  jarak?: number;
+  rfid?: boolean;
+  status?: string;
+}
+
 export interface TelemetryPoint extends SensorReadingValues {
   timestamp: string;
   epochMs: number;
+  jarak?: number;
+  rfid?: boolean;
+  deviceStatus?: string;
   mq4Source?: string;
   mq135Source?: string;
   temperatureSource?: string;
@@ -55,7 +69,6 @@ export interface SensorNodeConfig {
   name: string;
   coordinates: NodeCoordinates;
   depth: string;
-  baseline: SensorReadingValues;
 }
 
 export interface SensorNodeState {

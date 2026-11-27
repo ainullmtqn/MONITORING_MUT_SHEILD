@@ -6,6 +6,9 @@ import {
   ThresholdMap,
 } from '../types/sensor';
 
+export const MQTT_BROKER_URL = 'wss://broker.emqx.io:8084/mqtt';
+export const MQTT_TOPIC = 'ikn/mut/+';
+
 export const SENSOR_ORDER: SensorKey[] = ['mq4', 'mq135', 'temperature', 'humidity'];
 
 export const SENSOR_NODES: SensorNodeConfig[] = [
@@ -15,7 +18,6 @@ export const SENSOR_NODES: SensorNodeConfig[] = [
     name: 'MUT Sumbu Kebangsaan Barat',
     coordinates: { lat: -0.9652, lng: 116.7038 },
     depth: '-4.5 m',
-    baseline: { mq4: 245, mq135: 170, temperature: 25.6, humidity: 64.0 },
   },
   {
     id: 'node-02',
@@ -23,7 +25,6 @@ export const SENSOR_NODES: SensorNodeConfig[] = [
     name: 'MUT Sektor Istana Garuda',
     coordinates: { lat: -0.9624, lng: 116.7045 },
     depth: '-5.0 m',
-    baseline: { mq4: 310, mq135: 198, temperature: 26.2, humidity: 66.5 },
   },
   {
     id: 'node-03',
@@ -31,7 +32,6 @@ export const SENSOR_NODES: SensorNodeConfig[] = [
     name: 'MUT Simpang Titik Nol',
     coordinates: { lat: -0.9730, lng: 116.7094 },
     depth: '-4.0 m',
-    baseline: { mq4: 275, mq135: 185, temperature: 25.1, humidity: 62.5 },
   },
   {
     id: 'node-04',
@@ -39,7 +39,6 @@ export const SENSOR_NODES: SensorNodeConfig[] = [
     name: 'MUT Kawasan Kemenko 1',
     coordinates: { lat: -0.9685, lng: 116.7062 },
     depth: '-4.8 m',
-    baseline: { mq4: 205, mq135: 158, temperature: 25.8, humidity: 63.0 },
   },
 ];
 
@@ -131,7 +130,6 @@ export const DEFAULT_THRESHOLDS: ThresholdMap = {
 
 export const MAX_HISTORY_POINTS = 20;
 export const MAX_ALERT_LOGS = 80;
-export const POLL_INTERVAL_MS = 2000;
 
 export const STATUS_PRIORITY: Record<SensorStatus, number> = {
   normal: 1,
