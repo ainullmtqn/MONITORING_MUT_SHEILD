@@ -1,4 +1,10 @@
-import { DEFAULT_THRESHOLDS, SENSOR_METADATA, SENSOR_NODES, SENSOR_ORDER } from '../constants/sensors';
+import {
+  DEFAULT_THRESHOLDS,
+  MAX_HISTORY_POINTS,
+  SENSOR_METADATA,
+  SENSOR_NODES,
+  SENSOR_ORDER,
+} from '../constants/sensors';
 import { supabase } from '../supabaseClient';
 import {
   AlertLogEntry,
@@ -20,6 +26,16 @@ export type SupabaseSyncStatus =
 export interface SupabaseSyncState {
   status: SupabaseSyncStatus;
   message: string;
+}
+
+export interface InitialSupabaseData {
+  syncState: SupabaseSyncState;
+  historiesByNode: Record<string, TelemetryPoint[]>;
+  lastUpdatedByNode: Record<string, number | null>;
+  doorsByNode: Record<string, DoorStatus>;
+  alerts: AlertLogEntry[];
+  accessLogs: RfidAccessLogEntry[];
+  thresholds: ThresholdMap | null;
 }
 
 const NODE_BY_CODE = new Map<string, SensorNodeConfig>(
@@ -60,6 +76,12 @@ function formatDbTimestamp(raw: unknown): string {
   });
 }
 
+function parseEpochMs(raw: unknown): number {
+  if (!raw) return 0;
+  const d = new Date(String(raw));
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+}
+
 function parseThresholdsRecord(raw: unknown): ThresholdMap | null {
   if (!raw || typeof raw !== 'object') return null;
   const obj = raw as Record<string, unknown>;
@@ -76,14 +98,14 @@ function parseThresholdsRecord(raw: unknown): ThresholdMap | null {
   return parsed;
 }
 
-export async function checkAndLoadSupabaseInitialData(): Promise<{
-  syncState: SupabaseSyncState;
-  alerts: AlertLogEntry[];
-  accessLogs: RfidAccessLogEntry[];
-  thresholds: ThresholdMap | null;
-}> {
+export async function checkAndLoadSupabaseInitialData(): Promise<InitialSupabaseData> {
   try {
-    const [alertsRes, rfidRes, settingsRes] = await Promise.all([
+    const [sensorRes, alertsRes, rfidRes, settingsRes] = await Promise.all([
+      supabase
+        .from('sensor_logs')
+        .select('id, created_at, node_id, mq4, mq135, suhu, kelembapan, jarak, door, status')
+        .order('created_at', { ascending: false })
+        .limit(80),
       supabase
         .from('alert_logs')
         .select('id, created_at, node_id, sensor_name, value, threshold, level')
@@ -101,14 +123,54 @@ export async function checkAndLoadSupabaseInitialData(): Promise<{
         .limit(1),
     ]);
 
-    const firstError = alertsRes.error || rfidRes.error || settingsRes.error;
+    const firstError =
+      sensorRes.error || alertsRes.error || rfidRes.error || settingsRes.error;
     if (firstError) {
       return {
         syncState: mapSupabaseError(firstError),
+        historiesByNode: {},
+        lastUpdatedByNode: {},
+        doorsByNode: {},
         alerts: [],
         accessLogs: [],
         thresholds: null,
       };
+    }
+
+    // Group recent sensor_logs per node chronologically (oldest -> newest)
+    const historiesByNode: Record<string, TelemetryPoint[]> = {};
+    const lastUpdatedByNode: Record<string, number | null> = {};
+    const doorsByNode: Record<string, DoorStatus> = {};
+
+    const sensorRowsDesc = (sensorRes.data ?? []) as Array<Record<string, unknown>>;
+    for (let i = sensorRowsDesc.length - 1; i >= 0; i--) {
+      const row = sensorRowsDesc[i];
+      const nodeCode = String(row.node_id ?? '').toUpperCase();
+      const node = NODE_BY_CODE.get(nodeCode);
+      if (!node) continue;
+
+      const epochMs = parseEpochMs(row.created_at);
+      const doorRaw = String(row.door ?? 'LOCKED').toUpperCase();
+      const door: DoorStatus = doorRaw === 'OPEN' ? 'OPEN' : 'LOCKED';
+
+      const pt: TelemetryPoint = {
+        mq4: Number(row.mq4 ?? 0),
+        mq135: Number(row.mq135 ?? 0),
+        temperature: Number(row.suhu ?? 0),
+        humidity: Number(row.kelembapan ?? 0),
+        timestamp: formatDbTimestamp(row.created_at),
+        epochMs,
+        jarak: typeof row.jarak === 'number' ? row.jarak : undefined,
+        door,
+        deviceStatus: typeof row.status === 'string' ? row.status : undefined,
+      };
+
+      const prevList = historiesByNode[node.id] ?? [];
+      historiesByNode[node.id] = [...prevList.slice(-(MAX_HISTORY_POINTS - 1)), pt];
+      if (epochMs > 0) {
+        lastUpdatedByNode[node.id] = epochMs;
+      }
+      doorsByNode[node.id] = door;
     }
 
     const alerts: AlertLogEntry[] = (alertsRes.data ?? []).map(
@@ -172,8 +234,11 @@ export async function checkAndLoadSupabaseInitialData(): Promise<{
     return {
       syncState: {
         status: 'connected',
-        message: 'Terhubung ke Supabase (sensor_logs, alert_logs, rfid_logs, settings)',
+        message: 'Terhubung (Mode baca riwayat & simpan pengaturan; penulisan log oleh ESP32)',
       },
+      historiesByNode,
+      lastUpdatedByNode,
+      doorsByNode,
       alerts,
       accessLogs,
       thresholds: savedThresholds,
@@ -184,75 +249,13 @@ export async function checkAndLoadSupabaseInitialData(): Promise<{
         status: 'error',
         message: err instanceof Error ? err.message : 'Koneksi Supabase gagal',
       },
+      historiesByNode: {},
+      lastUpdatedByNode: {},
+      doorsByNode: {},
       alerts: [],
       accessLogs: [],
       thresholds: null,
     };
-  }
-}
-
-export async function insertSensorLogToSupabase(
-  node: SensorNodeConfig,
-  point: TelemetryPoint,
-  overallStatus: SensorStatus
-): Promise<SupabaseSyncState | null> {
-  try {
-    const { error } = await supabase.from('sensor_logs').insert({
-      node_id: node.code,
-      mq4: point.mq4,
-      mq135: point.mq135,
-      suhu: point.temperature,
-      kelembapan: point.humidity,
-      jarak: point.jarak ?? null,
-      door: point.door ?? 'LOCKED',
-      status:
-        overallStatus === 'danger'
-          ? 'BAHAYA'
-          : overallStatus === 'warning'
-            ? 'WASPADA'
-            : 'NORMAL',
-    });
-    if (error) return mapSupabaseError(error);
-    return {
-      status: 'connected',
-      message: 'Sinkronisasi sensor_logs aktif',
-    };
-  } catch {
-    return null;
-  }
-}
-
-export async function insertAlertLogToSupabase(
-  entry: AlertLogEntry
-): Promise<SupabaseSyncState | null> {
-  try {
-    const { error } = await supabase.from('alert_logs').insert({
-      node_id: entry.nodeCode,
-      sensor_name: entry.sensorName,
-      value: entry.value,
-      threshold: entry.thresholdValue,
-      level: entry.status === 'danger' ? 'BAHAYA' : 'WASPADA',
-    });
-    if (error) return mapSupabaseError(error);
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-export async function insertRfidLogToSupabase(
-  entry: RfidAccessLogEntry
-): Promise<SupabaseSyncState | null> {
-  try {
-    const { error } = await supabase.from('rfid_logs').insert({
-      node_id: entry.nodeCode,
-      door_status: entry.door,
-      access_result: entry.accessResult,
-    });
-    if (error) return mapSupabaseError(error);
-    return null;
-  } catch {
-    return null;
   }
 }
 

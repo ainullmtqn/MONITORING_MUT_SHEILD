@@ -21,9 +21,6 @@ import {
 import {
   SupabaseSyncState,
   checkAndLoadSupabaseInitialData,
-  insertAlertLogToSupabase,
-  insertRfidLogToSupabase,
-  insertSensorLogToSupabase,
   saveThresholdsToSupabase,
 } from '../services/supabaseSync';
 import {
@@ -177,8 +174,6 @@ export interface UseSensorStreamResult {
   recheckSupabase: () => void;
 }
 
-const SUPABASE_TELEMETRY_SYNC_INTERVAL_MS = 10000;
-
 export function useSensorStream(
   onAlertStatus?: (status: SensorStatus) => void
 ): UseSensorStreamResult {
@@ -237,7 +232,6 @@ export function useSensorStream(
     Object.fromEntries(SENSOR_NODES.map((node) => [node.id, createEmptyPoint()]))
   );
   const lastUpdatedRef = useRef<Record<string, number | null>>({ ...initialNullMap });
-  const lastSupabaseLogRef = useRef<Record<string, number>>({});
   const doorRef = useRef<Record<string, DoorStatus>>({ ...initialDoors });
   const toastTimersRef = useRef<Record<string, number>>({});
 
@@ -270,11 +264,63 @@ export function useSensorStream(
     });
     void checkAndLoadSupabaseInitialData().then((res) => {
       setSupabaseSync(res.syncState);
+
+      if (Object.keys(res.historiesByNode).length > 0) {
+        setHistoriesByNode((prev) => {
+          const next = { ...prev };
+          for (const [nodeId, pts] of Object.entries(res.historiesByNode)) {
+            if (!receivedNodesRef.current.has(nodeId) && pts.length > 0) {
+              next[nodeId] = pts;
+              latestByNodeRef.current[nodeId] = pts[pts.length - 1];
+              receivedNodesRef.current.add(nodeId);
+            }
+          }
+          return next;
+        });
+
+        setPeakHistory((prev) => {
+          if (prev.length > 0) return prev;
+          const allPts = Object.entries(res.historiesByNode).flatMap(
+            ([nodeId, pts]) => {
+              const cfg = SENSOR_NODES.find((n) => n.id === nodeId);
+              const tag = cfg ? formatNodeLocationTag(cfg) : nodeId;
+              return pts.map((pt) => ({
+                ...pt,
+                mq4Source: tag,
+                mq135Source: tag,
+                temperatureSource: tag,
+                humiditySource: tag,
+              }));
+            }
+          );
+          allPts.sort((a, b) => a.epochMs - b.epochMs);
+          return allPts.slice(-MAX_HISTORY_POINTS);
+        });
+      }
+
+      if (Object.keys(res.lastUpdatedByNode).length > 0) {
+        setLastUpdatedByNode((prev) => {
+          const next = { ...prev };
+          for (const [nodeId, ts] of Object.entries(res.lastUpdatedByNode)) {
+            if (next[nodeId] === null && ts !== null) {
+              next[nodeId] = ts;
+              lastUpdatedRef.current[nodeId] = ts;
+            }
+          }
+          return next;
+        });
+      }
+
+      if (Object.keys(res.doorsByNode).length > 0) {
+        setDoorByNode((prev) => ({ ...res.doorsByNode, ...prev }));
+      }
+
       if (res.alerts.length > 0) {
         setAlertLogs((prev) =>
           prev.length === 0 ? res.alerts : [...prev, ...res.alerts].slice(0, MAX_ALERT_LOGS)
         );
       }
+
       if (res.accessLogs.length > 0) {
         setAccessLogs((prev) =>
           prev.length === 0
@@ -282,13 +328,13 @@ export function useSensorStream(
             : [...prev, ...res.accessLogs].slice(0, MAX_ALERT_LOGS)
         );
       }
+
       if (res.thresholds) {
         setThresholds(res.thresholds);
       }
     });
   }, []);
 
-  // Load initial historical alerts / RFID logs from Supabase on mount
   useEffect(() => {
     runSupabaseCheck();
   }, [runSupabaseCheck]);
@@ -498,9 +544,6 @@ export function useSensorStream(
           mq4Value: mq4,
         };
         setAccessLogs((prev) => [accessEntry, ...prev].slice(0, MAX_ALERT_LOGS));
-        void insertRfidLogToSupabase(accessEntry).then((res) => {
-          if (res && !disposed) setSupabaseSync(res);
-        });
 
         const toastId = `toast-${epochMs}-${targetNode.id}-${Math.random().toString(36).slice(2, 6)}`;
         const toast: RfidToastNotification = {
@@ -544,7 +587,7 @@ export function useSensorStream(
 
         if (shouldLog) {
           const meta = SENSOR_METADATA[key];
-          const entry: AlertLogEntry = {
+          newEntries.push({
             id: `${epochMs}-${targetNode.id}-${key}-${Math.random().toString(36).slice(2, 6)}`,
             timestamp,
             nodeId: targetNode.id,
@@ -558,10 +601,6 @@ export function useSensorStream(
             unit: meta.unit,
             thresholdValue: status === 'danger' ? th.danger : th.warning,
             status,
-          };
-          newEntries.push(entry);
-          void insertAlertLogToSupabase(entry).then((res) => {
-            if (res && !disposed) setSupabaseSync(res);
           });
         }
 
@@ -570,22 +609,6 @@ export function useSensorStream(
 
       if (newEntries.length > 0) {
         setAlertLogs((prev) => [...newEntries, ...prev].slice(0, MAX_ALERT_LOGS));
-      }
-
-      // Throttled Supabase sensor_logs sync (every 10s per node or on alert)
-      const lastLoggedAt = lastSupabaseLogRef.current[targetNode.id] ?? 0;
-      if (
-        hasNewSpikeOrEscalation ||
-        epochMs - lastLoggedAt >= SUPABASE_TELEMETRY_SYNC_INTERVAL_MS
-      ) {
-        lastSupabaseLogRef.current[targetNode.id] = epochMs;
-        void insertSensorLogToSupabase(targetNode, point, highestStatus).then(
-          (res) => {
-            if (res && !disposed) {
-              setSupabaseSync(res);
-            }
-          }
-        );
       }
 
       if (hasNewSpikeOrEscalation && acknowledgedRef.current) {
