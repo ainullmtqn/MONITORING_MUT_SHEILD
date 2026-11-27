@@ -1,4 +1,4 @@
-import { AlertOctagon, AlertTriangle, BellOff, CheckCircle2 } from 'lucide-react';
+import { AlertOctagon, AlertTriangle, BellOff } from 'lucide-react';
 import {
   SENSOR_METADATA,
   SENSOR_ORDER,
@@ -27,37 +27,11 @@ export function AlertBanner({
   isAlarmAcknowledged,
   onAcknowledgeAlarm,
 }: AlertBannerProps) {
+  if (overallStatus === 'normal') return null;
+
   const onlineNodes = nodes.filter((n) => n.isOnline);
-
-  if (overallStatus === 'normal') {
-    return (
-      <div
-        role="status"
-        className="bg-[#F0FDF4] border border-[#BBF7D0] rounded-md px-4 py-2 flex items-center justify-between gap-3 shrink-0"
-      >
-        <div className="flex items-center gap-2.5 min-w-0">
-          <CheckCircle2 className="w-4 h-4 text-[#15803D] shrink-0" />
-          <p className="text-xs sm:text-sm text-[#15803D] truncate">
-            {onlineNodes.length > 0 ? (
-              <>
-                <span className="font-semibold">STATUS NORMAL:</span> Seluruh{' '}
-                {onlineNodes.length} titik online di MUT IKN berada di bawah ambang batas waspada.
-              </>
-            ) : (
-              <>
-                <span className="font-semibold">STANDBY:</span> Menunggu paket telemetri MQTT dari node terowongan MUT IKN (`ikn/mut/+`).
-              </>
-            )}
-          </p>
-        </div>
-        <span className="hidden sm:inline-block text-[11px] font-mono-tabular text-[#15803D] shrink-0">
-          {onlineNodes.length}/{nodes.length} NODE ONLINE
-        </span>
-      </div>
-    );
-  }
-
   const triggeredItems: TriggeredItem[] = [];
+
   for (const node of onlineNodes) {
     for (const key of SENSOR_ORDER) {
       const st = node.statuses[key];
@@ -105,7 +79,7 @@ export function AlertBanner({
   return (
     <div
       role="alert"
-      className={`rounded-md border px-4 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0 ${
+      className={`border-b px-4 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0 ${
         isDanger
           ? 'bg-[#FEF2F2] border-[#FECACA] text-[#B91C1C]'
           : 'bg-[#FFFBEB] border-[#FDE68A] text-[#B45309]'

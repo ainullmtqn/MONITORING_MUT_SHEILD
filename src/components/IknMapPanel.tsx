@@ -1,4 +1,4 @@
-import { Map as MapIcon } from 'lucide-react';
+import { LineChart as LineChartIcon, Map as MapIcon } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import {
   formatNodeLocation,
@@ -6,11 +6,14 @@ import {
   formatSensorValue,
 } from '../constants/sensors';
 import { NodeHealthStatus, SensorNodeState } from '../types/sensor';
+import { DoorBadge } from './DoorBadge';
+import { STATUS_STYLES } from './ThresholdGaugeBar';
 
 interface IknMapPanelProps {
   nodes: SensorNodeState[];
   selectedNodeId: string;
   onSelectNode: (nodeId: string) => void;
+  onViewNodeChart?: (nodeId: string) => void;
   embedded?: boolean;
 }
 
@@ -52,6 +55,7 @@ export function IknMapPanel({
   nodes,
   selectedNodeId,
   onSelectNode,
+  onViewNodeChart,
   embedded = false,
 }: IknMapPanelProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -122,7 +126,7 @@ export function IknMapPanel({
       }
 
       if (bounds.isValid()) {
-        map.fitBounds(bounds, { padding: [28, 28], maxZoom: 15 });
+        map.fitBounds(bounds, { padding: [36, 36], maxZoom: 15 });
       } else {
         map.setView([-0.9673, 116.706], 15);
       }
@@ -152,7 +156,6 @@ export function IknMapPanel({
     };
   }, []);
 
-  // Update marker icons & tooltips live without rebuilding the map
   useEffect(() => {
     const L = leafletRef.current;
     if (!L || !mapRef.current) return;
@@ -178,41 +181,21 @@ export function IknMapPanel({
 
   return (
     <section
-      className={`flex flex-col min-h-0 flex-1 ${
+      className={`flex flex-col min-h-0 ${
         embedded
-          ? ''
-          : 'bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+          ? 'flex-1'
+          : 'bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] overflow-hidden'
       }`}
     >
-      <div className="px-3.5 py-2 border-b border-[#E2E5EA] flex items-center justify-between gap-2 shrink-0">
+      <div className="px-3.5 py-2.5 border-b border-[#E2E5EA] flex flex-wrap items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <MapIcon className="w-4 h-4 text-[#64748B] shrink-0" />
           <h2 className="text-xs sm:text-sm font-semibold text-[#1E293B] truncate">
-            Peta Sektor MUT KIPP IKN
+            Peta Interaktif Sektor MUT KIPP IKN
           </h2>
         </div>
 
-        {activeNode ? (
-          <button
-            type="button"
-            onClick={() => onSelectNode('all')}
-            className="px-2 py-0.5 rounded border border-[#E2E5EA] bg-[#F4F5F7] hover:bg-[#E2E5EA]/60 text-[11px] font-medium text-[#1E293B] cursor-pointer shrink-0"
-          >
-            Semua Titik
-          </button>
-        ) : (
-          <span className="text-[10px] font-mono-tabular text-[#64748B] truncate">
-            Klik marker untuk fokus
-          </span>
-        )}
-      </div>
-
-      <div className="relative flex-1 min-h-[190px] w-full bg-[#F4F5F7]">
-        <div ref={containerRef} className="absolute inset-0 z-0" />
-      </div>
-
-      <div className="px-3 py-1.5 border-t border-[#E2E5EA] bg-[#F4F5F7]/70 flex flex-wrap items-center justify-between gap-2 text-[10px] font-mono-tabular text-[#64748B] shrink-0">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <div className="flex items-center gap-2 text-[10px] font-mono-tabular text-[#64748B]">
           <span className="inline-flex items-center gap-1">
             <span className="w-2 h-2 rounded-full bg-[#16A34A]" /> Normal
           </span>
@@ -226,10 +209,60 @@ export function IknMapPanel({
             <span className="w-2 h-2 rounded-full bg-[#64748B]" /> Offline
           </span>
         </div>
-        {activeNode && (
-          <span className="text-[#1E293B] font-semibold truncate">
-            {activeNode.config.code} • {formatNodeLocation(activeNode.config)}
-          </span>
+      </div>
+
+      <div className="relative flex-1 min-h-[260px] w-full bg-[#F4F5F7]">
+        <div ref={containerRef} className="absolute inset-0 z-0" />
+      </div>
+
+      <div className="px-3.5 py-2 border-t border-[#E2E5EA] bg-[#F4F5F7]/70 flex flex-wrap items-center justify-between gap-2 text-xs shrink-0">
+        {activeNode ? (
+          <>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 font-mono-tabular">
+              <span className="font-semibold text-[#1E293B]">
+                {activeNode.config.code} | {activeNode.config.name}
+              </span>
+              <span className="text-[11px] text-[#64748B]">
+                {formatNodeLocation(activeNode.config)}
+              </span>
+              <span className="text-[11px] text-[#1E293B]">
+                MQ-4: <strong>{formatSensorValue(activeNode.latest.mq4, 0)} ppm</strong> • MQ-135:{' '}
+                <strong>{formatSensorValue(activeNode.latest.mq135, 0)} ppm</strong>
+              </span>
+              <DoorBadge door={activeNode.door} />
+              <span
+                className={`px-1.5 py-0.5 rounded border text-[10px] font-semibold ${
+                  STATUS_STYLES[activeNode.overallStatus].badge
+                }`}
+              >
+                {STATUS_STYLES[activeNode.overallStatus].label}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => onSelectNode('all')}
+                className="px-2.5 py-1 rounded border border-[#E2E5EA] bg-white hover:bg-[#F8FAFC] text-[11px] font-medium text-[#64748B] hover:text-[#1E293B] cursor-pointer"
+              >
+                Reset Pilihan
+              </button>
+              {onViewNodeChart && (
+                <button
+                  type="button"
+                  onClick={() => onViewNodeChart(activeNode.config.id)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded border border-[#1E293B] bg-[#1E293B] hover:bg-[#334155] text-[11px] font-medium text-white cursor-pointer"
+                >
+                  <LineChartIcon className="w-3.5 h-3.5" />
+                  <span>Lihat Grafik</span>
+                </button>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className="text-[11px] font-mono-tabular text-[#64748B]">
+            Klik salah satu marker koordinat IKN pada peta untuk melihat detail atau membuka grafik node tersebut.
+          </p>
         )}
       </div>
     </section>

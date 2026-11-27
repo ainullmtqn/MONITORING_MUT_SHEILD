@@ -1,6 +1,6 @@
-import { Battery, BatteryLow, Layers } from 'lucide-react';
+import { Battery, BatteryLow, Layers, LineChart as LineChartIcon } from 'lucide-react';
 import {
-  formatNodeLocation,
+  formatCoordinates,
   formatOfflineDuration,
   formatSensorValue,
 } from '../constants/sensors';
@@ -12,6 +12,7 @@ interface NodeStatusPanelProps {
   sortedNodes: SensorNodeState[];
   selectedNodeId: string;
   onSelectNode: (nodeId: string) => void;
+  onViewNodeChart?: (nodeId: string) => void;
   embedded?: boolean;
 }
 
@@ -27,14 +28,14 @@ function BatteryIndicator({ battery }: { battery: number | null }) {
 
   return (
     <span
-      className={`inline-flex items-center gap-0.5 text-[10px] font-mono-tabular ${colorClass}`}
+      className={`inline-flex items-center gap-1 text-[11px] font-mono-tabular ${colorClass}`}
       title={
         battery === null
           ? 'Daya baterai belum dilaporkan ESP32'
           : `Level baterai: ${battery}%`
       }
     >
-      <Icon className="w-3 h-3 shrink-0" />
+      <Icon className="w-3.5 h-3.5 shrink-0" />
       <span>{battery === null ? '--%' : `${battery}%`}</span>
     </span>
   );
@@ -44,25 +45,26 @@ export function NodeStatusPanel({
   sortedNodes,
   selectedNodeId,
   onSelectNode,
+  onViewNodeChart,
   embedded = false,
 }: NodeStatusPanelProps) {
   const onlineCount = sortedNodes.filter((n) => n.isOnline).length;
 
   return (
     <section
-      className={`flex flex-col min-h-0 flex-1 ${
+      className={`flex flex-col min-h-0 ${
         embedded
-          ? ''
-          : 'bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)]'
+          ? 'flex-1'
+          : 'bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] overflow-hidden'
       }`}
     >
-      <div className="px-3.5 py-2 border-b border-[#E2E5EA] flex items-center justify-between gap-2 shrink-0">
+      <div className="px-3.5 py-2.5 border-b border-[#E2E5EA] flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <Layers className="w-4 h-4 text-[#64748B] shrink-0" />
           <h2 className="text-xs sm:text-sm font-semibold text-[#1E293B] truncate">
-            Status Titik Bawah Tanah (IKN)
+            Daftar Status Semua Titik Bawah Tanah (Auto-Sort)
           </h2>
-          <span className="px-1.5 py-0.5 text-[10px] font-mono-tabular bg-[#F4F5F7] border border-[#E2E5EA] rounded text-[#64748B]">
+          <span className="px-1.5 py-0.5 text-[10px] font-mono-tabular bg-[#F4F5F7] border border-[#E2E5EA] rounded text-[#64748B] shrink-0">
             {onlineCount}/{sortedNodes.length} ONLINE
           </span>
         </div>
@@ -78,15 +80,21 @@ export function NodeStatusPanel({
         )}
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto lab-scroll">
-        <table className="w-full text-left border-collapse">
+      <div className="flex-1 min-h-0 overflow-auto lab-scroll">
+        <table className="w-full text-left border-collapse min-w-[760px]">
           <thead className="sticky top-0 bg-[#F4F5F7] border-b border-[#E2E5EA] text-[10px] font-mono-tabular uppercase tracking-wide text-[#64748B]">
             <tr>
-              <th className="py-1.5 pl-3 pr-1.5 font-semibold">Titik & Daya</th>
-              <th className="py-1.5 px-1.5 text-right font-semibold">MQ-4</th>
-              <th className="py-1.5 px-1.5 text-right font-semibold">MQ-135</th>
-              <th className="py-1.5 px-1.5 text-center font-semibold">Pintu</th>
-              <th className="py-1.5 pl-1.5 pr-3 text-right font-semibold">Status</th>
+              <th className="py-2 pl-3.5 pr-2 font-semibold">Nama Titik</th>
+              <th className="py-2 px-2 font-semibold">Koordinat</th>
+              <th className="py-2 px-2 font-semibold">Kedalaman</th>
+              <th className="py-2 px-2 text-right font-semibold">MQ-4</th>
+              <th className="py-2 px-2 text-right font-semibold">MQ-135</th>
+              <th className="py-2 px-2 text-center font-semibold">Baterai</th>
+              <th className="py-2 px-2 text-center font-semibold">Pintu</th>
+              <th className="py-2 px-2 text-center font-semibold">Status</th>
+              {onViewNodeChart && (
+                <th className="py-2 pl-2 pr-3.5 text-right font-semibold">Aksi</th>
+              )}
             </tr>
           </thead>
           <tbody className="divide-y divide-[#E2E5EA] text-xs">
@@ -97,81 +105,100 @@ export function NodeStatusPanel({
                 <tr
                   key={node.config.id}
                   onClick={() => onSelectNode(node.config.id)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
-                      e.preventDefault();
-                      onSelectNode(node.config.id);
-                    }
-                  }}
-                  tabIndex={0}
-                  role="button"
-                  aria-pressed={isSelected}
-                  title={`Klik untuk fokus ke ${node.config.code} | ${node.config.name}`}
                   className={`cursor-pointer transition-colors ${
                     isSelected
                       ? 'bg-[#EFF6FF] hover:bg-[#DBEAFE]/60'
                       : 'hover:bg-[#F8FAFC]'
                   }`}
                 >
-                  <td className="py-2 pl-3 pr-1.5 max-w-[165px]">
+                  <td className="py-2 pl-3.5 pr-2">
                     <div
-                      className={`text-xs truncate ${
+                      className={`text-xs ${
                         isSelected ? 'font-semibold text-[#1D4ED8]' : 'font-medium text-[#1E293B]'
                       }`}
                     >
-                      <span className="font-mono-tabular font-semibold mr-1">
+                      <span className="font-mono-tabular font-semibold mr-1.5">
                         {node.config.code}
                       </span>
                       <span>{node.config.name}</span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-2 text-[10px] font-mono-tabular text-[#64748B]">
-                      <span className="truncate">{formatNodeLocation(node.config)}</span>
-                      <BatteryIndicator battery={node.battery} />
-                    </div>
                     {!node.isOnline && (
-                      <div className="text-[10px] font-mono-tabular text-[#475569] mt-0.5">
+                      <div className="text-[10px] font-mono-tabular text-[#64748B] mt-0.5">
                         {formatOfflineDuration(node.secondsSinceUpdate)}
                       </div>
                     )}
                   </td>
+
+                  <td className="py-2 px-2 font-mono-tabular text-[11px] text-[#64748B] whitespace-nowrap">
+                    {formatCoordinates(node.config)}
+                  </td>
+
+                  <td className="py-2 px-2 font-mono-tabular text-[11px] text-[#1E293B] whitespace-nowrap">
+                    {node.config.depth}
+                  </td>
+
                   <td
-                    className={`py-2 px-1.5 text-right font-mono-tabular whitespace-nowrap align-middle ${
-                      node.isOnline ? 'text-[#1E293B]' : 'text-[#94A3B8]'
+                    className={`py-2 px-2 text-right font-mono-tabular whitespace-nowrap ${
+                      node.isOnline ? 'text-[#1E293B] font-semibold' : 'text-[#94A3B8]'
                     }`}
                   >
-                    {node.isOnline ? (
-                      <>
-                        {formatSensorValue(node.latest.mq4, 0)}
-                        <span className="text-[10px] text-[#64748B] ml-0.5">ppm</span>
-                      </>
-                    ) : (
-                      '--'
-                    )}
+                    {node.isOnline
+                      ? `${formatSensorValue(node.latest.mq4, 0)} ppm`
+                      : '--'}
                   </td>
+
                   <td
-                    className={`py-2 px-1.5 text-right font-mono-tabular whitespace-nowrap align-middle ${
-                      node.isOnline ? 'text-[#1E293B]' : 'text-[#94A3B8]'
+                    className={`py-2 px-2 text-right font-mono-tabular whitespace-nowrap ${
+                      node.isOnline ? 'text-[#1E293B] font-semibold' : 'text-[#94A3B8]'
                     }`}
                   >
-                    {node.isOnline ? (
-                      <>
-                        {formatSensorValue(node.latest.mq135, 0)}
-                        <span className="text-[10px] text-[#64748B] ml-0.5">ppm</span>
-                      </>
-                    ) : (
-                      '--'
-                    )}
+                    {node.isOnline
+                      ? `${formatSensorValue(node.latest.mq135, 0)} ppm`
+                      : '--'}
                   </td>
-                  <td className="py-2 px-1.5 text-center whitespace-nowrap align-middle">
+
+                  <td className="py-2 px-2 text-center whitespace-nowrap">
+                    <BatteryIndicator battery={node.battery} />
+                  </td>
+
+                  <td className="py-2 px-2 text-center whitespace-nowrap">
                     <DoorBadge door={node.door} />
                   </td>
-                  <td className="py-2 pl-1.5 pr-3 text-right whitespace-nowrap align-middle">
-                    <span
-                      className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-mono-tabular font-semibold ${style.badge}`}
-                    >
-                      {style.label}
-                    </span>
+
+                  <td className="py-2 px-2 text-center whitespace-nowrap">
+                    <div className="inline-flex items-center gap-1">
+                      <span
+                        className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-mono-tabular font-semibold ${style.badge}`}
+                      >
+                        {style.label}
+                      </span>
+                      <span
+                        className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-mono-tabular font-semibold ${
+                          node.isOnline
+                            ? 'bg-[#F0FDF4] border-[#BBF7D0] text-[#15803D]'
+                            : 'bg-[#F4F5F7] border-[#E2E5EA] text-[#64748B]'
+                        }`}
+                      >
+                        {node.isOnline ? 'ONLINE' : 'OFFLINE'}
+                      </span>
+                    </div>
                   </td>
+
+                  {onViewNodeChart && (
+                    <td className="py-2 pl-2 pr-3.5 text-right whitespace-nowrap">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onViewNodeChart(node.config.id);
+                        }}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded border border-[#E2E5EA] bg-white hover:bg-[#F4F5F7] text-[11px] font-medium text-[#1E293B] cursor-pointer"
+                      >
+                        <LineChartIcon className="w-3 h-3 text-[#2563EB]" />
+                        <span>Lihat Grafik</span>
+                      </button>
+                    </td>
+                  )}
                 </tr>
               );
             })}

@@ -21,6 +21,7 @@ import {
 import {
   AlertLogEntry,
   DoorStatus,
+  MqttConnectionState,
   MqttSensorPayload,
   NodeHealthStatus,
   PeakReadingsMap,
@@ -160,6 +161,7 @@ export interface UseSensorStreamResult {
   clearAccessLogs: () => void;
   toasts: RfidToastNotification[];
   dismissToast: (id: string) => void;
+  connectionState: MqttConnectionState;
   isConnected: boolean;
   lastUpdatedAt: string;
   sampleCount: number;
@@ -199,7 +201,8 @@ export function useSensorStream(
   const [alertLogs, setAlertLogs] = useState<AlertLogEntry[]>([]);
   const [accessLogs, setAccessLogs] = useState<RfidAccessLogEntry[]>([]);
   const [toasts, setToasts] = useState<RfidToastNotification[]>([]);
-  const [isConnected, setIsConnected] = useState<boolean>(false);
+  const [connectionState, setConnectionState] =
+    useState<MqttConnectionState>('connecting');
   const [sampleCount, setSampleCount] = useState<number>(0);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string>('--:--:--');
   const [isAlarmAcknowledged, setIsAlarmAcknowledged] = useState<boolean>(false);
@@ -264,28 +267,28 @@ export function useSensorStream(
 
     client.on('connect', () => {
       if (disposed) return;
-      setIsConnected(true);
+      setConnectionState('connected');
       client.subscribe(MQTT_TOPIC, { qos: 0 }, (err) => {
         if (err && !disposed) {
-          setIsConnected(false);
+          setConnectionState('disconnected');
         }
       });
     });
 
     client.on('reconnect', () => {
-      if (!disposed) setIsConnected(false);
+      if (!disposed) setConnectionState('connecting');
     });
 
     client.on('offline', () => {
-      if (!disposed) setIsConnected(false);
+      if (!disposed) setConnectionState('disconnected');
     });
 
     client.on('close', () => {
-      if (!disposed) setIsConnected(false);
+      if (!disposed) setConnectionState('disconnected');
     });
 
     client.on('error', () => {
-      if (!disposed) setIsConnected(false);
+      if (!disposed) setConnectionState('disconnected');
     });
 
     client.on('message', (topic, messageBuffer) => {
@@ -383,7 +386,7 @@ export function useSensorStream(
 
       latestByNodeRef.current[targetNode.id] = point;
 
-      setIsConnected(true);
+      setConnectionState('connected');
       setSampleCount((c) => c + 1);
       setLastUpdatedAt(timestamp);
 
@@ -648,7 +651,8 @@ export function useSensorStream(
     clearAccessLogs,
     toasts,
     dismissToast,
-    isConnected,
+    connectionState,
+    isConnected: connectionState === 'connected',
     lastUpdatedAt,
     sampleCount,
   };

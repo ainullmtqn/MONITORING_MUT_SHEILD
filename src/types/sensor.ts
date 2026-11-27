@@ -4,6 +4,10 @@ export type SensorStatus = 'normal' | 'warning' | 'danger';
 
 export type NodeHealthStatus = SensorStatus | 'offline';
 
+export type MqttConnectionState = 'connecting' | 'connected' | 'disconnected';
+
+export type DashboardPage = 'monitoring' | 'map' | 'logs' | 'settings';
+
 export type DoorStatus = 'OPEN' | 'LOCKED';
 
 export type ChartFilter = 'all' | 'gas' | 'dht11';

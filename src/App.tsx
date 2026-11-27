@@ -1,376 +1,62 @@
 import { useState } from 'react';
-import { AccessLogPanel } from './components/AccessLogPanel';
 import { AlertBanner } from './components/AlertBanner';
-import { AlertLog } from './components/AlertLog';
-import { Dht11Card } from './components/Dht11Card';
 import { Header } from './components/Header';
-import { IknMapPanel } from './components/IknMapPanel';
-import { NodeStatusPanel } from './components/NodeStatusPanel';
-import { PinModal } from './components/PinModal';
 import { RfidToastContainer } from './components/RfidToastContainer';
-import { SensorCard } from './components/SensorCard';
-import { TelemetryChart } from './components/TelemetryChart';
-import { ThresholdModal } from './components/ThresholdModal';
-import {
-  SENSOR_METADATA,
-  SENSOR_NODES,
-  formatNodeLocation,
-} from './constants/sensors';
-import { useAlertAudio } from './hooks/useAlertAudio';
-import { useSensorStream } from './hooks/useSensorStream';
-import { SensorNodeConfig } from './types/sensor';
+import { Sidebar } from './components/Sidebar';
+import { MonitoringProvider, useMonitoring } from './context/MonitoringContext';
+import { LogsPage } from './pages/LogsPage';
+import { MapAndNodesPage } from './pages/MapAndNodesPage';
+import { MonitoringPage } from './pages/MonitoringPage';
+import { SettingsPage } from './pages/SettingsPage';
 
-type RightPanelTab = 'nodes' | 'map' | 'logs' | 'access';
-type ProtectedAction = 'open-threshold' | 'clear-alerts' | 'clear-access';
-
-const ACTION_DESCRIPTIONS: Record<ProtectedAction, string> = {
-  'open-threshold': 'mengubah pengaturan Ambang Batas sensor',
-  'clear-alerts': 'membersihkan tabel Riwayat Peringatan',
-  'clear-access': 'membersihkan tabel Log Akses RFID',
-};
-
-function formatPeakSource(node: SensorNodeConfig, onlineCount: number): string {
-  if (onlineCount === 0) return 'Menunggu sinyal node online';
-  return `Tertinggi: ${node.code} (${formatNodeLocation(node)})`;
-}
-
-function formatActiveSource(node: SensorNodeConfig, isOnline: boolean): string {
-  const prefix = isOnline ? 'Aktif' : 'Terakhir';
-  return `${prefix}: ${node.code} (${formatNodeLocation(node)})`;
-}
-
-export function App() {
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('all');
-  const [rightTab, setRightTab] = useState<RightPanelTab>('nodes');
-  const [isThresholdModalOpen, setIsThresholdModalOpen] = useState(false);
-  const [isOperatorUnlocked, setIsOperatorUnlocked] = useState(false);
-  const [pendingAction, setPendingAction] = useState<ProtectedAction | null>(null);
-
-  const { isAudioEnabled, toggleAudio, triggerAlarmTone } = useAlertAudio();
+function DashboardShell() {
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   const {
+    activePage,
     nodes,
-    sortedNodes,
-    onlineNodeCount,
-    peakReadings,
-    peakHistory,
-    thresholds,
-    updateThresholds,
     overallStatus,
     isAlarmAcknowledged,
     acknowledgeAlarm,
-    alertLogs,
-    clearAlertLogs,
-    accessLogs,
-    clearAccessLogs,
     toasts,
     dismissToast,
-    isConnected,
-    lastUpdatedAt,
-    sampleCount,
-  } = useSensorStream(triggerAlarmTone);
-
-  const executeProtectedAction = (action: ProtectedAction) => {
-    if (action === 'open-threshold') {
-      setIsThresholdModalOpen(true);
-    } else if (action === 'clear-alerts') {
-      clearAlertLogs();
-    } else if (action === 'clear-access') {
-      clearAccessLogs();
-    }
-  };
-
-  const requestProtectedAction = (action: ProtectedAction) => {
-    if (isOperatorUnlocked) {
-      executeProtectedAction(action);
-    } else {
-      setPendingAction(action);
-    }
-  };
-
-  const handlePinVerified = () => {
-    setIsOperatorUnlocked(true);
-    if (pendingAction) {
-      executeProtectedAction(pendingAction);
-      setPendingAction(null);
-    }
-  };
-
-  const isAllNodesMode = selectedNodeId === 'all';
-  const activeNode = isAllNodesMode
-    ? null
-    : nodes.find((n) => n.config.id === selectedNodeId) ?? null;
-
-  const mq4Display = activeNode
-    ? {
-        value: activeNode.latest.mq4,
-        status: activeNode.statuses.mq4,
-        sourceLabel: formatActiveSource(activeNode.config, activeNode.isOnline),
-      }
-    : {
-        value: peakReadings.mq4.value,
-        status: peakReadings.mq4.status,
-        sourceLabel: formatPeakSource(peakReadings.mq4.sourceNode, onlineNodeCount),
-      };
-
-  const mq135Display = activeNode
-    ? {
-        value: activeNode.latest.mq135,
-        status: activeNode.statuses.mq135,
-        sourceLabel: formatActiveSource(activeNode.config, activeNode.isOnline),
-      }
-    : {
-        value: peakReadings.mq135.value,
-        status: peakReadings.mq135.status,
-        sourceLabel: formatPeakSource(peakReadings.mq135.sourceNode, onlineNodeCount),
-      };
-
-  const tempDisplay = activeNode
-    ? {
-        value: activeNode.latest.temperature,
-        status: activeNode.statuses.temperature,
-        sourceLabel: activeNode.config.code,
-      }
-    : {
-        value: peakReadings.temperature.value,
-        status: peakReadings.temperature.status,
-        sourceLabel:
-          onlineNodeCount > 0 ? `Max: ${peakReadings.temperature.sourceNode.code}` : '--',
-      };
-
-  const humidityDisplay = activeNode
-    ? {
-        value: activeNode.latest.humidity,
-        status: activeNode.statuses.humidity,
-        sourceLabel: activeNode.config.code,
-      }
-    : {
-        value: peakReadings.humidity.value,
-        status: peakReadings.humidity.status,
-        sourceLabel:
-          onlineNodeCount > 0 ? `Max: ${peakReadings.humidity.sourceNode.code}` : '--',
-      };
-
-  const chartHistory = activeNode ? activeNode.history : peakHistory;
-  const activeNodeLabel = activeNode
-    ? `${activeNode.config.code} | ${activeNode.config.name}`
-    : `Semua Titik (${onlineNodeCount}/${nodes.length} Online — Nilai Puncak)`;
-  const activeNodeLocation = activeNode
-    ? formatNodeLocation(activeNode.config)
-    : 'KIPP IKN • Nilai tertinggi lintas titik bawah tanah online';
-
-  const triggeredNodeCount = nodes.filter(
-    (n) => n.isOnline && n.overallStatus !== 'normal'
-  ).length;
+  } = useMonitoring();
 
   return (
-    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#F4F5F7] text-[#1E293B] p-2.5 lg:p-3.5 flex flex-col gap-2.5">
+    <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#F4F5F7] text-[#1E293B] flex">
       <RfidToastContainer toasts={toasts} onDismiss={dismissToast} />
 
-      <Header
-        nodes={SENSOR_NODES}
-        selectedNodeId={selectedNodeId}
-        selectedNodeState={activeNode}
-        onlineNodeCount={onlineNodeCount}
-        onSelectNode={setSelectedNodeId}
-        isConnected={isConnected}
-        lastUpdatedAt={lastUpdatedAt}
-        sampleCount={sampleCount}
-        isAudioEnabled={isAudioEnabled}
-        onToggleAudio={toggleAudio}
-        onOpenThresholdModal={() => requestProtectedAction('open-threshold')}
-        isOperatorUnlocked={isOperatorUnlocked}
-        onLockOperator={() => setIsOperatorUnlocked(false)}
+      <Sidebar
+        isMobileOpen={isMobileSidebarOpen}
+        onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
 
-      <AlertBanner
-        nodes={nodes}
-        overallStatus={overallStatus}
-        isAlarmAcknowledged={isAlarmAcknowledged}
-        onAcknowledgeAlarm={acknowledgeAlarm}
-      />
+      <div className="flex-1 min-w-0 flex flex-col min-h-0">
+        <Header onOpenMobileSidebar={() => setIsMobileSidebarOpen(true)} />
 
-      <section
-        aria-label="Ringkasan nilai sensor real-time"
-        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[35fr_35fr_30fr] gap-2.5 shrink-0"
-      >
-        <SensorCard
-          meta={SENSOR_METADATA.mq4}
-          value={mq4Display.value}
-          threshold={thresholds.mq4}
-          status={mq4Display.status}
-          sourceLabel={mq4Display.sourceLabel}
+        <AlertBanner
+          nodes={nodes}
+          overallStatus={overallStatus}
+          isAlarmAcknowledged={isAlarmAcknowledged}
+          onAcknowledgeAlarm={acknowledgeAlarm}
         />
-        <SensorCard
-          meta={SENSOR_METADATA.mq135}
-          value={mq135Display.value}
-          threshold={thresholds.mq135}
-          status={mq135Display.status}
-          sourceLabel={mq135Display.sourceLabel}
-        />
-        <Dht11Card
-          temperature={tempDisplay.value}
-          humidity={humidityDisplay.value}
-          tempThreshold={thresholds.temperature}
-          humidityThreshold={thresholds.humidity}
-          tempStatus={tempDisplay.status}
-          humidityStatus={humidityDisplay.status}
-          tempSourceLabel={tempDisplay.sourceLabel}
-          humiditySourceLabel={humidityDisplay.sourceLabel}
-        />
-      </section>
 
-      <section
-        aria-label="Grafik telemetri, peta IKN, status titik, peringatan, dan log akses"
-        className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[65fr_35fr] gap-2.5"
-      >
-        <div className="min-h-0 h-full">
-          <TelemetryChart
-            history={chartHistory}
-            activeNodeLabel={activeNodeLabel}
-            activeNodeLocation={activeNodeLocation}
-            isAllNodesMode={isAllNodesMode}
-          />
-        </div>
-
-        <div className="min-h-[280px] lg:min-h-0 h-full bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex flex-col overflow-hidden">
-          <div
-            role="tablist"
-            aria-label="Panel kanan SCADA IKN"
-            className="grid grid-cols-4 border-b border-[#E2E5EA] bg-[#F4F5F7] p-1 gap-1 shrink-0"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={rightTab === 'nodes'}
-              onClick={() => setRightTab('nodes')}
-              className={`px-1.5 py-1.5 rounded-[3px] text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer ${
-                rightTab === 'nodes'
-                  ? 'bg-white text-[#1E293B] border border-[#E2E5EA]'
-                  : 'text-[#64748B] hover:text-[#1E293B] border border-transparent'
-              }`}
-            >
-              <span className="truncate">Status Titik</span>
-              <span
-                className={`px-1 rounded text-[10px] font-mono-tabular font-semibold ${
-                  triggeredNodeCount > 0
-                    ? 'bg-[#FEF2F2] text-[#B91C1C] border border-[#FECACA]'
-                    : 'bg-[#F4F5F7] text-[#64748B] border border-[#E2E5EA]'
-                }`}
-              >
-                {nodes.length}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={rightTab === 'map'}
-              onClick={() => setRightTab('map')}
-              className={`px-1.5 py-1.5 rounded-[3px] text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer ${
-                rightTab === 'map'
-                  ? 'bg-white text-[#1E293B] border border-[#E2E5EA]'
-                  : 'text-[#64748B] hover:text-[#1E293B] border border-transparent'
-              }`}
-            >
-              <span className="truncate">Peta IKN</span>
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={rightTab === 'logs'}
-              onClick={() => setRightTab('logs')}
-              className={`px-1.5 py-1.5 rounded-[3px] text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer ${
-                rightTab === 'logs'
-                  ? 'bg-white text-[#1E293B] border border-[#E2E5EA]'
-                  : 'text-[#64748B] hover:text-[#1E293B] border border-transparent'
-              }`}
-            >
-              <span className="truncate">Peringatan</span>
-              <span
-                className={`px-1 rounded text-[10px] font-mono-tabular font-semibold ${
-                  alertLogs.length > 0
-                    ? 'bg-[#FFFBEB] text-[#B45309] border border-[#FDE68A]'
-                    : 'bg-[#F4F5F7] text-[#64748B] border border-[#E2E5EA]'
-                }`}
-              >
-                {alertLogs.length}
-              </span>
-            </button>
-
-            <button
-              type="button"
-              role="tab"
-              aria-selected={rightTab === 'access'}
-              onClick={() => setRightTab('access')}
-              className={`px-1.5 py-1.5 rounded-[3px] text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer ${
-                rightTab === 'access'
-                  ? 'bg-white text-[#1E293B] border border-[#E2E5EA]'
-                  : 'text-[#64748B] hover:text-[#1E293B] border border-transparent'
-              }`}
-            >
-              <span className="truncate">Log Akses</span>
-              <span
-                className={`px-1 rounded text-[10px] font-mono-tabular font-semibold ${
-                  accessLogs.length > 0
-                    ? 'bg-[#F0F9FF] text-[#0369A1] border border-[#BAE6FD]'
-                    : 'bg-[#F4F5F7] text-[#64748B] border border-[#E2E5EA]'
-                }`}
-              >
-                {accessLogs.length}
-              </span>
-            </button>
-          </div>
-
-          <div className="flex-1 min-h-0 flex flex-col">
-            {rightTab === 'nodes' ? (
-              <NodeStatusPanel
-                sortedNodes={sortedNodes}
-                selectedNodeId={selectedNodeId}
-                onSelectNode={setSelectedNodeId}
-                embedded
-              />
-            ) : rightTab === 'map' ? (
-              <IknMapPanel
-                nodes={nodes}
-                selectedNodeId={selectedNodeId}
-                onSelectNode={setSelectedNodeId}
-                embedded
-              />
-            ) : rightTab === 'logs' ? (
-              <AlertLog
-                logs={alertLogs}
-                onClearLogs={() => requestProtectedAction('clear-alerts')}
-                embedded
-              />
-            ) : (
-              <AccessLogPanel
-                logs={accessLogs}
-                onClearLogs={() => requestProtectedAction('clear-access')}
-                embedded
-              />
-            )}
-          </div>
-        </div>
-      </section>
-
-      <ThresholdModal
-        isOpen={isThresholdModalOpen}
-        thresholds={thresholds}
-        onClose={() => setIsThresholdModalOpen(false)}
-        onSave={updateThresholds}
-      />
-
-      <PinModal
-        isOpen={pendingAction !== null}
-        actionDescription={
-          pendingAction ? ACTION_DESCRIPTIONS[pendingAction] : ''
-        }
-        onClose={() => setPendingAction(null)}
-        onSuccess={handlePinVerified}
-      />
+        <main className="flex-1 min-h-0 p-3 lg:p-4 flex flex-col overflow-y-auto lg:overflow-hidden">
+          {activePage === 'monitoring' && <MonitoringPage />}
+          {activePage === 'map' && <MapAndNodesPage />}
+          {activePage === 'logs' && <LogsPage />}
+          {activePage === 'settings' && <SettingsPage />}
+        </main>
+      </div>
     </div>
+  );
+}
+
+export function App() {
+  return (
+    <MonitoringProvider>
+      <DashboardShell />
+    </MonitoringProvider>
   );
 }
 
