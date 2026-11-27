@@ -14,6 +14,7 @@ import { ChartFilter, SensorKey, TelemetryPoint } from '../types/sensor';
 interface TelemetryChartProps {
   history: TelemetryPoint[];
   activeNodeLabel: string;
+  activeNodeLocation: string;
   isAllNodesMode: boolean;
 }
 
@@ -74,6 +75,7 @@ interface CustomTooltipProps {
   }>;
   label?: string;
   activeNodeLabel: string;
+  activeNodeLocation: string;
   isAllNodesMode: boolean;
 }
 
@@ -82,17 +84,21 @@ function ChartTooltip({
   payload,
   label,
   activeNodeLabel,
+  activeNodeLocation,
   isAllNodesMode,
 }: CustomTooltipProps) {
   if (!active || !payload || payload.length === 0) return null;
   const point = payload[0]?.payload;
 
   return (
-    <div className="bg-white border border-[#E2E5EA] rounded shadow-[0_1px_3px_rgba(15,23,42,0.08)] px-3 py-2 text-xs">
+    <div className="bg-white border border-[#E2E5EA] rounded shadow-[0_1px_3px_rgba(15,23,42,0.08)] px-3 py-2 text-xs max-w-[280px]">
       <div className="font-mono-tabular text-[11px] text-[#64748B] border-b border-[#E2E5EA] pb-1 mb-1.5 space-y-0.5">
         <div>Waktu: {label}</div>
-        <div className="text-[#1E293B] font-medium">
-          Titik: {activeNodeLabel}
+        <div className="text-[#1E293B] font-medium truncate">
+          {activeNodeLabel}
+        </div>
+        <div className="text-[10px] text-[#64748B] truncate">
+          {activeNodeLocation}
         </div>
       </div>
       <div className="space-y-1">
@@ -121,8 +127,8 @@ function ChartTooltip({
                 </span>
               </div>
               {sourceName && (
-                <div className="text-[10px] text-[#64748B] pl-3.5">
-                  Puncak: {sourceName}
+                <div className="text-[10px] text-[#64748B] pl-3.5 truncate">
+                  {sourceName}
                 </div>
               )}
             </div>
@@ -136,6 +142,7 @@ function ChartTooltip({
 export function TelemetryChart({
   history,
   activeNodeLabel,
+  activeNodeLocation,
   isAllNodesMode,
 }: TelemetryChartProps) {
   const [filter, setFilter] = useState<ChartFilter>('all');
@@ -152,7 +159,7 @@ export function TelemetryChart({
           </h2>
           <p className="text-[11px] text-[#64748B] font-mono-tabular">
             20 SAMPEL TERAKHIR • GARIS DATAR DENGAN TITIK (MARKERS) •{' '}
-            {isAllNodesMode ? 'NILAI PUNCAK ANTAR TITIK' : 'DATA KHUSUS TITIK TERPILIH'}
+            {isAllNodesMode ? 'NILAI PUNCAK ANTAR TITIK MUT' : activeNodeLocation}
           </p>
         </div>
 
@@ -267,6 +274,7 @@ export function TelemetryChart({
               content={
                 <ChartTooltip
                   activeNodeLabel={activeNodeLabel}
+                  activeNodeLocation={activeNodeLocation}
                   isAllNodesMode={isAllNodesMode}
                 />
               }

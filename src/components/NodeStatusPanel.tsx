@@ -1,5 +1,5 @@
 import { Layers } from 'lucide-react';
-import { formatSensorValue } from '../constants/sensors';
+import { formatNodeLocation, formatSensorValue } from '../constants/sensors';
 import { SensorNodeState } from '../types/sensor';
 import { STATUS_STYLES } from './ThresholdGaugeBar';
 
@@ -15,12 +15,12 @@ export function NodeStatusPanel({
   onSelectNode,
 }: NodeStatusPanelProps) {
   return (
-    <section className="bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex flex-col shrink-0 max-h-[215px]">
+    <section className="bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex flex-col shrink-0 max-h-[245px]">
       <div className="px-3.5 py-2 border-b border-[#E2E5EA] flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <Layers className="w-4 h-4 text-[#64748B] shrink-0" />
           <h2 className="text-sm font-semibold text-[#1E293B] truncate">
-            Status Titik Sensor
+            Status Titik Bawah Tanah (IKN)
           </h2>
           <span className="px-1.5 py-0.5 text-[11px] font-mono-tabular bg-[#F4F5F7] border border-[#E2E5EA] rounded text-[#64748B]">
             {sortedNodes.length}
@@ -42,7 +42,7 @@ export function NodeStatusPanel({
         <table className="w-full text-left border-collapse">
           <thead className="sticky top-0 bg-[#F4F5F7] border-b border-[#E2E5EA] text-[10px] font-mono-tabular uppercase tracking-wide text-[#64748B]">
             <tr>
-              <th className="py-1.5 pl-3.5 pr-2 font-semibold">Nama Titik</th>
+              <th className="py-1.5 pl-3.5 pr-2 font-semibold">Titik & Koordinat</th>
               <th className="py-1.5 px-2 text-right font-semibold">MQ-4</th>
               <th className="py-1.5 px-2 text-right font-semibold">MQ-135</th>
               <th className="py-1.5 pl-2 pr-3.5 text-right font-semibold">Status</th>
@@ -65,27 +65,37 @@ export function NodeStatusPanel({
                   tabIndex={0}
                   role="button"
                   aria-pressed={isSelected}
-                  title={`Klik untuk fokus ke ${node.config.name}`}
+                  title={`Klik untuk fokus ke ${node.config.code} | ${node.config.name}`}
                   className={`cursor-pointer transition-colors ${
                     isSelected
                       ? 'bg-[#EFF6FF] hover:bg-[#DBEAFE]/60'
                       : 'hover:bg-[#F8FAFC]'
                   }`}
                 >
-                  <td className="py-1.5 pl-3.5 pr-2 font-medium text-[#1E293B] truncate max-w-[140px]">
-                    <span className={isSelected ? 'font-semibold text-[#1D4ED8]' : ''}>
-                      {node.config.name}
-                    </span>
+                  <td className="py-1.5 pl-3.5 pr-2 max-w-[190px]">
+                    <div
+                      className={`text-xs truncate ${
+                        isSelected ? 'font-semibold text-[#1D4ED8]' : 'font-medium text-[#1E293B]'
+                      }`}
+                    >
+                      <span className="font-mono-tabular font-semibold mr-1">
+                        {node.config.code}
+                      </span>
+                      <span>{node.config.name}</span>
+                    </div>
+                    <div className="text-[10px] font-mono-tabular text-[#64748B] truncate">
+                      {formatNodeLocation(node.config)}
+                    </div>
                   </td>
-                  <td className="py-1.5 px-2 text-right font-mono-tabular text-[#1E293B] whitespace-nowrap">
+                  <td className="py-1.5 px-2 text-right font-mono-tabular text-[#1E293B] whitespace-nowrap align-middle">
                     {formatSensorValue(node.latest.mq4, 0)}
                     <span className="text-[10px] text-[#64748B] ml-0.5">ppm</span>
                   </td>
-                  <td className="py-1.5 px-2 text-right font-mono-tabular text-[#1E293B] whitespace-nowrap">
+                  <td className="py-1.5 px-2 text-right font-mono-tabular text-[#1E293B] whitespace-nowrap align-middle">
                     {formatSensorValue(node.latest.mq135, 0)}
                     <span className="text-[10px] text-[#64748B] ml-0.5">ppm</span>
                   </td>
-                  <td className="py-1.5 pl-2 pr-3.5 text-right whitespace-nowrap">
+                  <td className="py-1.5 pl-2 pr-3.5 text-right whitespace-nowrap align-middle">
                     <span
                       className={`inline-block px-1.5 py-0.5 rounded border text-[10px] font-mono-tabular font-semibold ${style.badge}`}
                     >

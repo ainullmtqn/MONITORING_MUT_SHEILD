@@ -10,41 +10,57 @@ export const SENSOR_ORDER: SensorKey[] = ['mq4', 'mq135', 'temperature', 'humidi
 
 export const SENSOR_NODES: SensorNodeConfig[] = [
   {
-    id: 'titik-1',
+    id: 'node-01',
     code: 'NODE-01',
-    shortName: 'Titik 1',
-    name: 'Titik 1 - Pipa Utama',
-    baseline: { mq4: 260, mq135: 175, temperature: 26.4, humidity: 56.0 },
+    name: 'MUT Sumbu Kebangsaan Barat',
+    coordinates: { lat: -0.9652, lng: 116.7038 },
+    depth: '-4.5 m',
+    baseline: { mq4: 245, mq135: 170, temperature: 25.6, humidity: 64.0 },
   },
   {
-    id: 'titik-2',
+    id: 'node-02',
     code: 'NODE-02',
-    shortName: 'Titik 2',
-    name: 'Titik 2 - Ruang Kompresor',
-    baseline: { mq4: 315, mq135: 205, temperature: 28.2, humidity: 54.5 },
+    name: 'MUT Sektor Istana Garuda',
+    coordinates: { lat: -0.9624, lng: 116.7045 },
+    depth: '-5.0 m',
+    baseline: { mq4: 310, mq135: 198, temperature: 26.2, humidity: 66.5 },
   },
   {
-    id: 'titik-3',
+    id: 'node-03',
     code: 'NODE-03',
-    shortName: 'Titik 3',
-    name: 'Titik 3 - Gudang Gas',
-    baseline: { mq4: 285, mq135: 190, temperature: 25.8, humidity: 60.5 },
+    name: 'MUT Simpang Titik Nol',
+    coordinates: { lat: -0.9730, lng: 116.7094 },
+    depth: '-4.0 m',
+    baseline: { mq4: 275, mq135: 185, temperature: 25.1, humidity: 62.5 },
   },
   {
-    id: 'titik-4',
+    id: 'node-04',
     code: 'NODE-04',
-    shortName: 'Titik 4',
-    name: 'Titik 4 - Ruang Panel',
-    baseline: { mq4: 195, mq135: 160, temperature: 27.1, humidity: 52.0 },
+    name: 'MUT Kawasan Kemenko 1',
+    coordinates: { lat: -0.9685, lng: 116.7062 },
+    depth: '-4.8 m',
+    baseline: { mq4: 205, mq135: 158, temperature: 25.8, humidity: 63.0 },
   },
 ];
+
+export function formatCoordinates(node: SensorNodeConfig): string {
+  return `${node.coordinates.lat.toFixed(4)}, ${node.coordinates.lng.toFixed(4)}`;
+}
+
+export function formatNodeLocation(node: SensorNodeConfig): string {
+  return `${formatCoordinates(node)} • ${node.depth}`;
+}
+
+export function formatNodeLocationTag(node: SensorNodeConfig): string {
+  return `${node.code} • ${formatNodeLocation(node)}`;
+}
 
 export const SENSOR_METADATA: Record<SensorKey, SensorMeta> = {
   mq4: {
     key: 'mq4',
     code: 'MQ-4',
     label: 'MQ-4',
-    sublabel: 'Gas Metana (CH₄)',
+    sublabel: 'Gas Metana (CH₄) Terowongan',
     unit: 'ppm',
     min: 0,
     max: 2000,
@@ -52,15 +68,15 @@ export const SENSOR_METADATA: Record<SensorKey, SensorMeta> = {
     decimals: 0,
     chartColor: '#2563EB',
     actionAdvice: {
-      warning: 'Periksa segel pipa gas dan tingkatkan sirkulasi exhaust fan.',
-      danger: 'Segera tutup katup sumber gas, evakuasi area, dan aktifkan ventilasi darurat!',
+      warning: 'Aktifkan kipas ventilasi terowongan MUT dan periksa segel pipa gas utilitas.',
+      danger: 'Kebocoran metana kritis! Isolasi katup sektor MUT, evakuasi teknisi, dan jalankan purge fan maksimal!',
     },
   },
   mq135: {
     key: 'mq135',
     code: 'MQ-135',
     label: 'MQ-135',
-    sublabel: 'Kualitas Udara (VOC/CO₂)',
+    sublabel: 'Kualitas Udara Terowongan (VOC/CO₂)',
     unit: 'ppm',
     min: 0,
     max: 1000,
@@ -68,15 +84,15 @@ export const SENSOR_METADATA: Record<SensorKey, SensorMeta> = {
     decimals: 0,
     chartColor: '#16A34A',
     actionAdvice: {
-      warning: 'Aktifkan blower sirkulasi udara segar untuk menurunkan konsentrasi polutan.',
-      danger: 'Kualitas udara kritis! Hentikan aktivitas proses kimia dan buka ventilasi penuh.',
+      warning: 'Tingkatkan sirkulasi udara segar ke dalam segmen terowongan MUT.',
+      danger: 'Akumulasi gas berbahaya di terowongan! Tunda akses teknisi dan buka damper ventilasi darurat.',
     },
   },
   temperature: {
     key: 'temperature',
     code: 'DHT11',
     label: 'DHT11 - Suhu',
-    sublabel: 'Temperatur Ruang',
+    sublabel: 'Temperatur Terowongan MUT',
     unit: '°C',
     min: 0,
     max: 60,
@@ -84,8 +100,8 @@ export const SENSOR_METADATA: Record<SensorKey, SensorMeta> = {
     decimals: 1,
     chartColor: '#D97706',
     actionAdvice: {
-      warning: 'Periksa sistem pendingin HVAC dan beban kerja peralatan di ruangan.',
-      danger: 'Suhu berlebih! Aktifkan pendingin cadangan dan periksa potensi overheat perangkat.',
+      warning: 'Periksa beban termal jalur kabel daya dan sistem aliran udara MUT.',
+      danger: 'Suhu terowongan berlebih! Periksa potensi hotspot kabel utilitas dan aktifkan pendinginan.',
     },
   },
   humidity: {
@@ -100,8 +116,8 @@ export const SENSOR_METADATA: Record<SensorKey, SensorMeta> = {
     decimals: 1,
     chartColor: '#475569',
     actionAdvice: {
-      warning: 'Aktifkan dehumidifier untuk mencegah kondensasi pada panel elektronik.',
-      danger: 'Kelembapan ekstrem! Lindungi modul elektronik sensitif dan periksa kebocoran uap/air.',
+      warning: 'Aktifkan unit dehumidifier terowongan untuk menjaga panel sensor dan kabel.',
+      danger: 'Kelembapan ekstrem di segmen bawah tanah! Periksa rembesan air tanah dan proteksi panel.',
     },
   },
 };

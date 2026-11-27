@@ -44,11 +44,17 @@ export interface TelemetryPoint extends SensorReadingValues {
   humiditySource?: string;
 }
 
+export interface NodeCoordinates {
+  lat: number;
+  lng: number;
+}
+
 export interface SensorNodeConfig {
   id: string;
   code: string;
-  shortName: string;
   name: string;
+  coordinates: NodeCoordinates;
+  depth: string;
   baseline: SensorReadingValues;
 }
 
@@ -63,9 +69,7 @@ export interface SensorNodeState {
 export interface PeakSensorReading {
   value: number;
   status: SensorStatus;
-  sourceNodeId: string;
-  sourceNodeName: string;
-  sourceShortName: string;
+  sourceNode: SensorNodeConfig;
 }
 
 export type PeakReadingsMap = Record<SensorKey, PeakSensorReading>;
@@ -74,7 +78,9 @@ export interface AlertLogEntry {
   id: string;
   timestamp: string;
   nodeId: string;
+  nodeCode: string;
   nodeName: string;
+  nodeLocationTag: string;
   sensorKey: SensorKey;
   sensorName: string;
   value: number;

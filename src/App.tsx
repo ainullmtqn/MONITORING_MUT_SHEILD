@@ -7,9 +7,22 @@ import { NodeStatusPanel } from './components/NodeStatusPanel';
 import { SensorCard } from './components/SensorCard';
 import { TelemetryChart } from './components/TelemetryChart';
 import { ThresholdModal } from './components/ThresholdModal';
-import { SENSOR_METADATA, SENSOR_NODES } from './constants/sensors';
+import {
+  SENSOR_METADATA,
+  SENSOR_NODES,
+  formatNodeLocation,
+} from './constants/sensors';
 import { useAlertAudio } from './hooks/useAlertAudio';
 import { useSensorStream } from './hooks/useSensorStream';
+import { SensorNodeConfig } from './types/sensor';
+
+function formatPeakSource(node: SensorNodeConfig): string {
+  return `Tertinggi: ${node.code} (${formatNodeLocation(node)})`;
+}
+
+function formatActiveSource(node: SensorNodeConfig): string {
+  return `Aktif: ${node.code} (${formatNodeLocation(node)})`;
+}
 
 export function App() {
   const [selectedNodeId, setSelectedNodeId] = useState<string>('all');
@@ -40,54 +53,57 @@ export function App() {
     ? {
         value: activeNode.latest.mq4,
         status: activeNode.statuses.mq4,
-        sourceLabel: `Sumber: ${activeNode.config.name}`,
+        sourceLabel: formatActiveSource(activeNode.config),
       }
     : {
         value: peakReadings.mq4.value,
         status: peakReadings.mq4.status,
-        sourceLabel: `Tertinggi: ${peakReadings.mq4.sourceNodeName} (dari ${nodes.length} titik)`,
+        sourceLabel: formatPeakSource(peakReadings.mq4.sourceNode),
       };
 
   const mq135Display = activeNode
     ? {
         value: activeNode.latest.mq135,
         status: activeNode.statuses.mq135,
-        sourceLabel: `Sumber: ${activeNode.config.name}`,
+        sourceLabel: formatActiveSource(activeNode.config),
       }
     : {
         value: peakReadings.mq135.value,
         status: peakReadings.mq135.status,
-        sourceLabel: `Tertinggi: ${peakReadings.mq135.sourceNodeName} (dari ${nodes.length} titik)`,
+        sourceLabel: formatPeakSource(peakReadings.mq135.sourceNode),
       };
 
   const tempDisplay = activeNode
     ? {
         value: activeNode.latest.temperature,
         status: activeNode.statuses.temperature,
-        sourceLabel: activeNode.config.shortName,
+        sourceLabel: activeNode.config.code,
       }
     : {
         value: peakReadings.temperature.value,
         status: peakReadings.temperature.status,
-        sourceLabel: `Max: ${peakReadings.temperature.sourceShortName}`,
+        sourceLabel: `Max: ${peakReadings.temperature.sourceNode.code}`,
       };
 
   const humidityDisplay = activeNode
     ? {
         value: activeNode.latest.humidity,
         status: activeNode.statuses.humidity,
-        sourceLabel: activeNode.config.shortName,
+        sourceLabel: activeNode.config.code,
       }
     : {
         value: peakReadings.humidity.value,
         status: peakReadings.humidity.status,
-        sourceLabel: `Max: ${peakReadings.humidity.sourceShortName}`,
+        sourceLabel: `Max: ${peakReadings.humidity.sourceNode.code}`,
       };
 
   const chartHistory = activeNode ? activeNode.history : peakHistory;
   const activeNodeLabel = activeNode
-    ? activeNode.config.name
-    : `Semua Titik (${nodes.length} Titik — Nilai Puncak)`;
+    ? `${activeNode.config.code} | ${activeNode.config.name}`
+    : `Semua Titik (${nodes.length} Node MUT — Nilai Puncak)`;
+  const activeNodeLocation = activeNode
+    ? formatNodeLocation(activeNode.config)
+    : 'KIPP IKN • Nilai tertinggi lintas semua titik bawah tanah';
 
   return (
     <div className="min-h-screen lg:h-screen lg:overflow-hidden bg-[#F4F5F7] text-[#1E293B] p-3 lg:p-4 flex flex-col gap-3">
@@ -136,13 +152,14 @@ export function App() {
       </section>
 
       <section
-        aria-label="Grafik telemetri, status titik, dan riwayat peringatan"
+        aria-label="Grafik telemetri, status titik bawah tanah, dan riwayat peringatan"
         className="flex-1 min-h-0 grid grid-cols-1 lg:grid-cols-[65fr_35fr] gap-3"
       >
         <div className="min-h-0 h-full">
           <TelemetryChart
             history={chartHistory}
             activeNodeLabel={activeNodeLabel}
+            activeNodeLocation={activeNodeLocation}
             isAllNodesMode={isAllNodesMode}
           />
         </div>

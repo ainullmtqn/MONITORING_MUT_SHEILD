@@ -9,6 +9,7 @@ import {
   SENSOR_ORDER,
   STATUS_PRIORITY,
   evaluateSensorStatus,
+  formatNodeLocationTag,
   formatTimestamp,
   getHighestStatus,
 } from '../constants/sensors';
@@ -56,11 +57,11 @@ function buildInitialNodeHistory(node: SensorNodeConfig): TelemetryPoint[] {
       mq4: roundTo(clamp(current.mq4 + (Math.random() - 0.48) * 28, 120, 440), 0),
       mq135: roundTo(clamp(current.mq135 + (Math.random() - 0.48) * 18, 100, 310), 0),
       temperature: roundTo(
-        clamp(current.temperature + (Math.random() - 0.5) * 0.5, 23.5, 30.8),
+        clamp(current.temperature + (Math.random() - 0.5) * 0.5, 22.5, 30.8),
         1
       ),
       humidity: roundTo(
-        clamp(current.humidity + (Math.random() - 0.5) * 1.3, 46.0, 69.0),
+        clamp(current.humidity + (Math.random() - 0.5) * 1.3, 52.0, 72.0),
         1
       ),
     };
@@ -75,10 +76,10 @@ function buildInitialNodeHistory(node: SensorNodeConfig): TelemetryPoint[] {
 }
 
 /**
- * Standalone multi-node telemetry fetcher.
+ * Standalone multi-node subsurface MUT telemetry fetcher.
  * Replace the body of `fetchLatestNodeReadings` with a `fetch()` call to an
- * ESP32 gateway REST API, WebSocket state snapshot, or MQTT HTTP bridge when
- * connecting physical sensor nodes.
+ * ESP32 / LoRaWAN / RS-485 gateway REST API, WebSocket, or MQTT HTTP bridge
+ * when integrating field hardware in the IKN Multi-Utility Tunnel.
  */
 export async function fetchLatestNodeReadings(
   sim: MultiNodeSimulator,
@@ -87,8 +88,6 @@ export async function fetchLatestNodeReadings(
 ): Promise<Record<string, TelemetryPoint>> {
   sim.tick += 1;
 
-  // Periodically inject an excursion on one node (prioritizing MQ-4/MQ-135)
-  // so multi-node worst-case tracking and auto-sorting can be observed naturally.
   if (sim.tick % 5 === 0) {
     const activeSpikes = nodes.filter(
       (n) => sim.byNode[n.id].spikeTicksRemaining > 0
@@ -178,7 +177,10 @@ function buildPeakHistory(
   const peakPoints: TelemetryPoint[] = [];
 
   for (let i = 0; i < sampleLen; i++) {
-    const first = historiesByNode[nodes[0].id][i];
+    const firstNode = nodes[0];
+    const first = historiesByNode[firstNode.id][i];
+    const firstTag = formatNodeLocationTag(firstNode);
+
     const peakPoint: TelemetryPoint = {
       mq4: first.mq4,
       mq135: first.mq135,
@@ -186,32 +188,33 @@ function buildPeakHistory(
       humidity: first.humidity,
       timestamp: first.timestamp,
       epochMs: first.epochMs,
-      mq4Source: nodes[0].name,
-      mq135Source: nodes[0].name,
-      temperatureSource: nodes[0].name,
-      humiditySource: nodes[0].name,
+      mq4Source: firstTag,
+      mq135Source: firstTag,
+      temperatureSource: firstTag,
+      humiditySource: firstTag,
     };
 
     for (let nIdx = 1; nIdx < nodes.length; nIdx++) {
       const node = nodes[nIdx];
       const pt = historiesByNode[node.id][i];
       if (!pt) continue;
+      const tag = formatNodeLocationTag(node);
 
       if (pt.mq4 > peakPoint.mq4) {
         peakPoint.mq4 = pt.mq4;
-        peakPoint.mq4Source = node.name;
+        peakPoint.mq4Source = tag;
       }
       if (pt.mq135 > peakPoint.mq135) {
         peakPoint.mq135 = pt.mq135;
-        peakPoint.mq135Source = node.name;
+        peakPoint.mq135Source = tag;
       }
       if (pt.temperature > peakPoint.temperature) {
         peakPoint.temperature = pt.temperature;
-        peakPoint.temperatureSource = node.name;
+        peakPoint.temperatureSource = tag;
       }
       if (pt.humidity > peakPoint.humidity) {
         peakPoint.humidity = pt.humidity;
-        peakPoint.humiditySource = node.name;
+        peakPoint.humiditySource = tag;
       }
     }
 
@@ -347,7 +350,9 @@ export function useSensorStream(
                 id: `${point.epochMs}-${node.id}-${key}-${Math.random().toString(36).slice(2, 6)}`,
                 timestamp: point.timestamp,
                 nodeId: node.id,
+                nodeCode: node.code,
                 nodeName: node.name,
+                nodeLocationTag: formatNodeLocationTag(node),
                 sensorKey: key,
                 sensorName: meta.label,
                 value: val,
@@ -428,9 +433,7 @@ export function useSensorStream(
       result[key] = {
         value: bestNode.latest[key],
         status: bestNode.statuses[key],
-        sourceNodeId: bestNode.config.id,
-        sourceNodeName: bestNode.config.name,
-        sourceShortName: bestNode.config.shortName,
+        sourceNode: bestNode.config,
       };
     }
     return result;

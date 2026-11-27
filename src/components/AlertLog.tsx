@@ -9,7 +9,7 @@ interface AlertLogProps {
 
 export function AlertLog({ logs, onClearLogs }: AlertLogProps) {
   return (
-    <section className="bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex flex-col min-h-[200px] lg:min-h-0 flex-1">
+    <section className="bg-white border border-[#E2E5EA] rounded-md shadow-[0_1px_2px_rgba(15,23,42,0.04)] flex flex-col min-h-[190px] lg:min-h-0 flex-1">
       <div className="px-3.5 py-2 border-b border-[#E2E5EA] flex items-center justify-between gap-2 shrink-0">
         <div className="flex items-center gap-2 min-w-0">
           <ClipboardList className="w-4 h-4 text-[#64748B] shrink-0" />
@@ -36,12 +36,12 @@ export function AlertLog({ logs, onClearLogs }: AlertLogProps) {
 
       <div className="flex-1 min-h-0 overflow-y-auto lab-scroll divide-y divide-[#E2E5EA]">
         {logs.length === 0 ? (
-          <div className="h-full min-h-[120px] flex flex-col items-center justify-center p-4 text-center">
+          <div className="h-full min-h-[110px] flex flex-col items-center justify-center p-4 text-center">
             <p className="text-xs font-medium text-[#64748B]">
               Belum ada catatan pelanggaran ambang batas.
             </p>
             <p className="text-[11px] text-[#64748B] mt-1 font-mono-tabular">
-              Log tercatat otomatis per titik saat WASPADA / BAHAYA.
+              Log lokasi & koordinat tercatat otomatis saat WASPADA / BAHAYA.
             </p>
           </div>
         ) : (
@@ -58,12 +58,15 @@ export function AlertLog({ logs, onClearLogs }: AlertLogProps) {
                     <span className="font-mono-tabular text-[11px] text-[#64748B]">
                       {entry.timestamp}
                     </span>
-                    <span className="font-mono-tabular text-[10px] font-medium px-1.5 py-0.2 rounded bg-[#F4F5F7] border border-[#E2E5EA] text-[#1E293B]">
-                      {entry.nodeName}
-                    </span>
                     <span className="font-semibold text-[#1E293B]">
                       {entry.sensorName}
                     </span>
+                    <span className="text-[10px] font-mono-tabular text-[#64748B] truncate">
+                      ({entry.nodeName})
+                    </span>
+                  </div>
+                  <div className="font-mono-tabular text-[10px] text-[#64748B] mt-0.5 truncate">
+                    [{entry.nodeLocationTag}]
                   </div>
                   <div className="font-mono-tabular text-[11px] text-[#64748B] mt-0.5">
                     Nilai:{' '}

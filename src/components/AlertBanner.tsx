@@ -2,6 +2,7 @@ import { AlertOctagon, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import {
   SENSOR_METADATA,
   SENSOR_ORDER,
+  formatNodeLocationTag,
   formatSensorValue,
 } from '../constants/sensors';
 import { SensorKey, SensorNodeState, SensorStatus } from '../types/sensor';
@@ -12,7 +13,7 @@ interface AlertBannerProps {
 }
 
 interface TriggeredItem {
-  nodeName: string;
+  nodeLocationTag: string;
   sensorKey: SensorKey;
   value: number;
   status: Exclude<SensorStatus, 'normal'>;
@@ -28,7 +29,7 @@ export function AlertBanner({ nodes, overallStatus }: AlertBannerProps) {
         <div className="flex items-center gap-2.5 min-w-0">
           <CheckCircle2 className="w-4 h-4 text-[#15803D] shrink-0" />
           <p className="text-xs sm:text-sm text-[#15803D] truncate">
-            <span className="font-semibold">STATUS NORMAL:</span> Seluruh {nodes.length} titik sensor berada di bawah ambang batas waspada.
+            <span className="font-semibold">STATUS NORMAL:</span> Seluruh {nodes.length} titik terowongan MUT IKN berada di bawah ambang batas waspada.
           </p>
         </div>
         <span className="hidden sm:inline-block text-[11px] font-mono-tabular text-[#15803D] shrink-0">
@@ -44,7 +45,7 @@ export function AlertBanner({ nodes, overallStatus }: AlertBannerProps) {
       const st = node.statuses[key];
       if (st !== 'normal') {
         triggeredItems.push({
-          nodeName: node.config.name,
+          nodeLocationTag: formatNodeLocationTag(node.config),
           sensorKey: key,
           value: node.latest[key],
           status: st,
@@ -69,17 +70,17 @@ export function AlertBanner({ nodes, overallStatus }: AlertBannerProps) {
     : primaryMeta.actionAdvice.warning;
 
   const affectedSummary = triggeredItems
-    .slice(0, 3)
+    .slice(0, 2)
     .map((item) => {
       const meta = SENSOR_METADATA[item.sensorKey];
-      return `[${item.nodeName}] ${meta.label} (${formatSensorValue(item.value, meta.decimals)} ${meta.unit})`;
+      return `[${item.nodeLocationTag}] ${meta.label} (${formatSensorValue(item.value, meta.decimals)} ${meta.unit})`;
     })
     .join(', ');
 
   const extraCount =
-    triggeredItems.length > 3 ? ` +${triggeredItems.length - 3} lainnya` : '';
+    triggeredItems.length > 2 ? ` +${triggeredItems.length - 2} lainnya` : '';
 
-  const affectedNodesCount = new Set(prioritized.map((i) => i.nodeName)).size;
+  const affectedNodesCount = new Set(prioritized.map((i) => i.nodeLocationTag)).size;
 
   return (
     <div
