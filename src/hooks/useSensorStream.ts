@@ -405,7 +405,7 @@ export function useSensorStream(
       if (!disposed) setConnectionState('disconnected');
     });
 
-    client.on('message', (topic, messageBuffer) => {
+    client.on('message', (topic, messageBuffer, packet) => {
       if (disposed) return;
 
       let payload: MqttSensorPayload;
@@ -417,6 +417,7 @@ export function useSensorStream(
 
       const targetNode = resolveTargetNode(payload, topic);
       if (!targetNode) return;
+      const isRetained = Boolean(packet?.retain);
 
       const mq4 = toValidNumber(
         payload.mq4,
@@ -457,7 +458,8 @@ export function useSensorStream(
       );
       const batteryPct = toValidNumber(payload.battery, 0, 100);
       const roundedBattery = batteryPct !== null ? Math.round(batteryPct) : null;
-      const isRfidTap = payload.rfid === true;
+      // Ignore retained rfid flags on initial connect so stale taps never replay as new toasts
+      const isRfidTap = !isRetained && payload.rfid === true;
 
       doorRef.current[targetNode.id] = currentDoor;
       lastUpdatedRef.current[targetNode.id] = epochMs;

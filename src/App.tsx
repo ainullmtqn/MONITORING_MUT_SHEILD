@@ -1,13 +1,28 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { AlertBanner } from './components/AlertBanner';
 import { Header } from './components/Header';
 import { RfidToastContainer } from './components/RfidToastContainer';
 import { Sidebar } from './components/Sidebar';
 import { SensorProvider, useSensorContext } from './context/SensorContext';
-import { LogsPage } from './pages/LogsPage';
-import { MapAndNodesPage } from './pages/MapAndNodesPage';
 import { MonitoringPage } from './pages/MonitoringPage';
-import { SettingsPage } from './pages/SettingsPage';
+
+const MapAndNodesPage = lazy(() =>
+  import('./pages/MapAndNodesPage').then((m) => ({ default: m.MapAndNodesPage }))
+);
+const LogsPage = lazy(() =>
+  import('./pages/LogsPage').then((m) => ({ default: m.LogsPage }))
+);
+const SettingsPage = lazy(() =>
+  import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage }))
+);
+
+function PageLoadingFallback() {
+  return (
+    <div className="flex-1 flex items-center justify-center bg-white border border-[#E2E5EA] rounded-md text-xs font-mono-tabular text-[#64748B]">
+      Memuat modul halaman...
+    </div>
+  );
+}
 
 function DashboardShell() {
   const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
@@ -43,9 +58,13 @@ function DashboardShell() {
 
         <main className="flex-1 min-h-0 p-3 lg:p-4 flex flex-col overflow-y-auto lg:overflow-hidden">
           {activePage === 'monitoring' && <MonitoringPage />}
-          {activePage === 'map' && <MapAndNodesPage />}
-          {activePage === 'logs' && <LogsPage />}
-          {activePage === 'settings' && <SettingsPage />}
+          {activePage !== 'monitoring' && (
+            <Suspense fallback={<PageLoadingFallback />}>
+              {activePage === 'map' && <MapAndNodesPage />}
+              {activePage === 'logs' && <LogsPage />}
+              {activePage === 'settings' && <SettingsPage />}
+            </Suspense>
+          )}
         </main>
       </div>
     </div>

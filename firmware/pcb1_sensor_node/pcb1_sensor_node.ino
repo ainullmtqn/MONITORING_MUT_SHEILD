@@ -13,7 +13,7 @@ const int mqtt_port = 1883;
 const char* mqtt_topic = "ikn/mut/node01";
 const char* node_id = "NODE-01";
 
-// --- Konfigurasi Supabase REST API (Aktif 24/7 meski web tidak dibuka) ---
+// --- Konfigurasi Supabase REST API (Aktif 24/7 via Background Task) ---
 const char* supabase_url = "https://yhtvyongrbpmscvslgks.supabase.co";
 const char* supabase_key = "sb_publishable_Ys8kCYOZyB5u5ze7yArtew_PKscjpK8";
 
@@ -39,13 +39,18 @@ const int MQ135_WASPADA = 350;
 const int MQ135_BAHAYA  = 700;
 const float SUHU_MAX    = 38.0;
 
-const unsigned long SUPABASE_INTERVAL_MS = 15000; // Simpan sensor_logs tiap 15 detik
+const unsigned long MQTT_INTERVAL_MS       = 2000;   // Kirim MQTT tiap 2 detik
+const unsigned long SUPABASE_INTERVAL_MS   = 15000;  // Simpan sensor_logs tiap 15 detik
+const unsigned long MQTT_RECONNECT_WAIT_MS = 3000;   // Coba ulang MQTT non-blocking tiap 3 dtk
+const unsigned long RFID_DEBOUNCE_MS       = 300;
 
-unsigned long lastSend = 0;
-unsigned long lastSupabaseSend = 0;
-unsigned long doorOpenTime = 0;
-bool isDoorOpen = false;
-bool lastRfidState = HIGH;
+unsigned long lastSend             = 0;
+unsigned long lastSupabaseSend     = 0;
+unsigned long lastMqttReconnectTry = 0;
+unsigned long lastRfidTapMs        = 0;
+unsigned long doorOpenTime         = 0;
+bool isDoorOpen                    = false;
+bool lastRfidState                 = HIGH;
 
 // Variabel pembacaan terbaru
 int mq4_ppm = 0;
@@ -57,28 +62,15 @@ String statusSensor = "NORMAL";
 String prevSupabaseStatus = "NORMAL";
 String doorStatus = "LOCKED";
 
-void setup_wifi() {
-  Serial.print("Menghubungkan ke Wi-Fi");
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(300);
-    Serial.print(".");
-  }
-  Serial.println("\nWi-Fi Terhubung!");
-}
+// --- Antrean & Task Latar Belakang FreeRTOS untuk Supabase (Non-Blocking) ---
+struct SupabaseJob {
+  char table[24];
+  char body[320];
+};
 
-void reconnect_mqtt() {
-  while (!client.connected()) {
-    String clientId = "ESP32-PCB1-" + String(random(0xffff), HEX);
-    if (client.connect(clientId.c_str())) {
-      Serial.println("MQTT Terhubung!");
-    } else {
-      delay(3000);
-    }
-  }
-}
+QueueHandle_t supabaseQueue = nullptr;
 
-bool postToSupabase(const char* table, const String& jsonBody) {
+bool postToSupabase(const char* table, const char* jsonBody) {
   if (WiFi.status() != WL_CONNECTED) return false;
 
   WiFiClientSecure secClient;
@@ -103,6 +95,46 @@ bool postToSupabase(const char* table, const String& jsonBody) {
   return httpCode >= 200 && httpCode < 300;
 }
 
+void supabaseWorkerTask(void* pvParameters) {
+  (void)pvParameters;
+  SupabaseJob job;
+  for (;;) {
+    if (xQueueReceive(supabaseQueue, &job, portMAX_DELAY) == pdTRUE) {
+      postToSupabase(job.table, job.body);
+    }
+  }
+}
+
+void enqueueSupabaseJob(const char* table, const String& jsonBody) {
+  if (supabaseQueue == nullptr) return;
+  SupabaseJob job;
+  strlcpy(job.table, table, sizeof(job.table));
+  strlcpy(job.body, jsonBody.c_str(), sizeof(job.body));
+  // Jika antrean penuh, lewati tanpa memblokir loop MQTT
+  xQueueSend(supabaseQueue, &job, 0);
+}
+
+void setup_wifi() {
+  Serial.print("Menghubungkan ke Wi-Fi");
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(300);
+    Serial.print(".");
+  }
+  Serial.println("\nWi-Fi Terhubung!");
+}
+
+void tryReconnectMqttNonBlocking(unsigned long now) {
+  if (client.connected()) return;
+  if (now - lastMqttReconnectTry < MQTT_RECONNECT_WAIT_MS) return;
+  lastMqttReconnectTry = now;
+
+  String clientId = "ESP32-PCB1-" + String(random(0xffff), HEX);
+  if (client.connect(clientId.c_str())) {
+    Serial.println("MQTT Terhubung!");
+  }
+}
+
 void kirimSensorKeSupabase() {
   StaticJsonDocument<256> doc;
   doc["node_id"]    = node_id;
@@ -116,7 +148,7 @@ void kirimSensorKeSupabase() {
 
   String body;
   serializeJson(doc, body);
-  postToSupabase("sensor_logs", body);
+  enqueueSupabaseJob("sensor_logs", body);
 }
 
 void kirimAlertKeSupabase(const char* sensorName, float value, float threshold, const String& level) {
@@ -129,7 +161,7 @@ void kirimAlertKeSupabase(const char* sensorName, float value, float threshold, 
 
   String body;
   serializeJson(doc, body);
-  postToSupabase("alert_logs", body);
+  enqueueSupabaseJob("alert_logs", body);
 }
 
 void kirimRfidKeSupabase(const String& doorStr, const char* accessResult) {
@@ -140,7 +172,7 @@ void kirimRfidKeSupabase(const String& doorStr, const char* accessResult) {
 
   String body;
   serializeJson(doc, body);
-  postToSupabase("rfid_logs", body);
+  enqueueSupabaseJob("rfid_logs", body);
 }
 
 void bacaDanEvaluasiSensor() {
@@ -174,6 +206,8 @@ void bacaDanEvaluasiSensor() {
 }
 
 void kirimMQTT(bool rfidEvent) {
+  if (!client.connected()) return;
+
   StaticJsonDocument<256> doc;
   doc["node_id"]    = node_id;
   doc["mq4"]        = mq4_ppm;
@@ -186,8 +220,12 @@ void kirimMQTT(bool rfidEvent) {
   doc["door"]       = doorStatus;
 
   char buffer[256];
-  serializeJson(doc, buffer);
-  client.publish(mqtt_topic, buffer);
+  size_t len = serializeJson(doc, buffer, sizeof(buffer));
+
+  // Retain=true untuk telemetri rutin agar web langsung dapat data terakhir tanpa delay
+  // Retain=false untuk event RFID agar tap lama tidak terputar ulang saat web dibuka
+  bool retained = !rfidEvent;
+  client.publish(mqtt_topic, (const uint8_t*)buffer, len, retained);
   Serial.print("Kirim MQTT: ");
   Serial.println(buffer);
 }
@@ -223,44 +261,63 @@ void setup() {
 
   setup_wifi();
   client.setServer(mqtt_server, mqtt_port);
+
+  // Buat queue & background worker task di Core 0 agar HTTPS Supabase tidak memblokir MQTT
+  supabaseQueue = xQueueCreate(12, sizeof(SupabaseJob));
+  BaseType_t workerCore =
+#if defined(CONFIG_FREERTOS_UNICORE) && CONFIG_FREERTOS_UNICORE
+    0;
+#else
+    0;
+#endif
+  xTaskCreatePinnedToCore(
+    supabaseWorkerTask,
+    "SupabaseWorker",
+    8192,
+    nullptr,
+    1,
+    nullptr,
+    workerCore
+  );
 }
 
 void loop() {
-  if (!client.connected()) {
-    reconnect_mqtt();
-  }
-  client.loop();
+  unsigned long now = millis();
 
-  // 1. Cek tombol RFID setiap saat (real-time, tidak menunggu jeda 2 detik)
+  if (!client.connected()) {
+    tryReconnectMqttNonBlocking(now);
+  } else {
+    client.loop();
+  }
+
+  // 1. Cek tombol RFID setiap saat (non-blocking debounce)
   bool currentRfidState = digitalRead(PIN_RFID);
-  if (lastRfidState == HIGH && currentRfidState == LOW) {
+  if (lastRfidState == HIGH && currentRfidState == LOW && (now - lastRfidTapMs >= RFID_DEBOUNCE_MS)) {
+    lastRfidTapMs = now;
     bacaDanEvaluasiSensor();
 
     if (statusSensor == "NORMAL") {
-      // Semua sensor aman -> Buka pintu
       isDoorOpen = true;
-      doorOpenTime = millis();
+      doorOpenTime = now;
       digitalWrite(PIN_DOOR, HIGH);
       doorStatus = "OPEN";
-      tone(PIN_BUZZER, 1500, 150); // Bip konfirmasi akses diterima
+      tone(PIN_BUZZER, 1500, 150);
       Serial.println("[RFID] Kondisi AMAN -> PINTU DIBUKA (5 detik)");
       kirimRfidKeSupabase("OPEN", "DITERIMA");
     } else {
-      // Kondisi WASPADA / BAHAYA -> Kunci pintu & tolak akses
       isDoorOpen = false;
       digitalWrite(PIN_DOOR, LOW);
       doorStatus = "LOCKED";
-      tone(PIN_BUZZER, 400, 500); // Nada rendah akses ditolak
+      tone(PIN_BUZZER, 400, 500);
       Serial.println("[RFID] Kondisi BERBAHAYA -> AKSES DITOLAK, PINTU TETAP TERKUNCI!");
       kirimRfidKeSupabase("LOCKED", "DITOLAK");
     }
     kirimMQTT(true);
-    delay(250); // Debounce tombol
   }
   lastRfidState = currentRfidState;
 
   // 2. Auto-lock pintu setelah 5 detik terbuka
-  if (isDoorOpen && (millis() - doorOpenTime >= 5000)) {
+  if (isDoorOpen && (now - doorOpenTime >= 5000)) {
     isDoorOpen = false;
     digitalWrite(PIN_DOOR, LOW);
     doorStatus = "LOCKED";
@@ -269,15 +326,15 @@ void loop() {
   }
 
   // 3. Kirim telemetri rutin setiap 2 detik ke MQTT
-  if (millis() - lastSend >= 2000) {
-    lastSend = millis();
+  if (now - lastSend >= MQTT_INTERVAL_MS) {
+    lastSend = now;
     bacaDanEvaluasiSensor();
     kirimMQTT(false);
 
-    // 4. Simpan ke Supabase tiap 15 detik atau saat status berubah
+    // 4. Antrekan pengiriman ke Supabase tiap 15 detik atau saat status berubah (non-blocking)
     bool statusChanged = (statusSensor != prevSupabaseStatus);
-    if (statusChanged || (millis() - lastSupabaseSend >= SUPABASE_INTERVAL_MS)) {
-      lastSupabaseSend = millis();
+    if (statusChanged || (now - lastSupabaseSend >= SUPABASE_INTERVAL_MS)) {
+      lastSupabaseSend = now;
       cekDanCatatPeringatanSupabase();
       prevSupabaseStatus = statusSensor;
       kirimSensorKeSupabase();
