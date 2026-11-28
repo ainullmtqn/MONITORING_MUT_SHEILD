@@ -40,12 +40,14 @@ const int MQ135_WASPADA = 350;
 const int MQ135_BAHAYA  = 700;
 const float SUHU_MAX    = 38.0;
 
-const unsigned long MQTT_INTERVAL_MS       = 2000;   // Kirim MQTT tiap 2 detik
-const unsigned long SUPABASE_INTERVAL_MS   = 15000;  // Simpan sensor_logs tiap 15 detik
+const unsigned long MQTT_INTERVAL_MS       = 1000;   // Kirim MQTT tiap 1 detik (real-time)
+const unsigned long DHT_INTERVAL_MS        = 2500;   // DHT11/22 fisik butuh >= 2 dtk per baca
+const unsigned long SUPABASE_INTERVAL_MS   = 5000;   // Simpan sensor_logs tiap 5 detik (Core 0)
 const unsigned long MQTT_RECONNECT_WAIT_MS = 3000;   // Coba ulang MQTT non-blocking tiap 3 dtk
 const unsigned long RFID_DEBOUNCE_MS       = 300;
 
 unsigned long lastSend             = 0;
+unsigned long lastDhtReadMs        = 0;
 unsigned long lastSupabaseSend     = 0;
 unsigned long lastMqttReconnectTry = 0;
 unsigned long lastRfidTapMs        = 0;
@@ -184,14 +186,21 @@ void kirimRfidKeSupabase(const String& doorStr, const char* accessResult) {
 }
 
 void bacaDanEvaluasiSensor() {
+  unsigned long now = millis();
+
+  // Sensor analog ADC (MQ-4, MQ-135, TOF) sangat cepat (< 1 ms)
   mq4_ppm   = map(analogRead(PIN_MQ4), 0, 4095, 0, 2000);
   mq135_ppm = map(analogRead(PIN_MQ135), 0, 4095, 0, 1000);
   jarak_cm  = map(analogRead(PIN_TOF), 0, 4095, 0, 200);
 
-  float t = dht.readTemperature();
-  float h = dht.readHumidity();
-  if (!isnan(t)) suhu = t;
-  if (!isnan(h)) kelembapan = h;
+  // Baca DHT hanya tiap 2.5 detik agar tidak memblokir pengiriman MQTT 1 detik
+  if (lastDhtReadMs == 0 || (now - lastDhtReadMs >= DHT_INTERVAL_MS)) {
+    lastDhtReadMs = now;
+    float t = dht.readTemperature();
+    float h = dht.readHumidity();
+    if (!isnan(t)) suhu = t;
+    if (!isnan(h)) kelembapan = h;
+  }
 
   // Evaluasi status seluruh sensor
   if (mq4_ppm >= MQ4_BAHAYA || mq135_ppm >= MQ135_BAHAYA || suhu >= SUHU_MAX) {
@@ -268,6 +277,7 @@ void setup() {
   digitalWrite(PIN_DOOR, LOW); // Kondisi awal pintu terkunci
 
   setup_wifi();
+  espClient.setNoDelay(true); // Kirim paket TCP MQTT seketika tanpa delay Nagle
   client.setServer(mqtt_server, mqtt_port);
   client.setBufferSize(512);
 
@@ -334,13 +344,13 @@ void loop() {
     kirimMQTT(false);
   }
 
-  // 3. Kirim telemetri rutin setiap 2 detik ke MQTT
+  // 3. Kirim telemetri rutin tepat setiap 1 detik ke MQTT
   if (now - lastSend >= MQTT_INTERVAL_MS) {
-    lastSend = now;
+    lastSend = (now - lastSend >= 3 * MQTT_INTERVAL_MS) ? now : (lastSend + MQTT_INTERVAL_MS);
     bacaDanEvaluasiSensor();
     kirimMQTT(false);
 
-    // 4. Antrekan pengiriman ke Supabase tiap 15 detik atau saat status berubah (non-blocking)
+    // 4. Antrekan pengiriman ke Supabase tiap 5 detik atau saat status berubah (non-blocking Core 0)
     bool statusChanged = (statusSensor != prevSupabaseStatus);
     if (statusChanged || (now - lastSupabaseSend >= SUPABASE_INTERVAL_MS)) {
       lastSupabaseSend = now;

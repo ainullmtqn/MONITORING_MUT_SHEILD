@@ -13,8 +13,8 @@ Firmware disesuaikan dengan skematik & pemetaan pin Wokwi / ESP32 Anda:
 | RFID | `GPIO 5` | `INPUT_PULLUP` tombol trigger simulasi RFID |
 | Relay / LED Pintu | `GPIO 26` | `HIGH` (`OPEN` 5 detik) / `LOW` (`LOCKED`) |
 
-- **MQTT Live:** Publish JSON tiap **2 detik** ke `broker.emqx.io:1883` topik `ikn/mut/node01`.
-- **Supabase 24/7:** Mengirim HTTP `POST` ke `sensor_logs` (tiap 15 detik atau saat status berubah), `alert_logs` (saat `WASPADA`/`BAHAYA`), dan `rfid_logs` (saat RFID di-tap).
+- **MQTT Live:** Publish JSON tepat tiap **1 detik** (`MQTT_INTERVAL_MS = 1000`) ke `broker.emqx.io:1883` topik `ikn/mut/node01` (dengan `setNoDelay(true)` dan pembacaan DHT terpisah tiap 2,5 detik).
+- **Supabase 24/7:** Mengirim HTTP `POST` di background task Core 0 ke `sensor_logs` (tiap 5 detik atau saat status berubah), `alert_logs` (saat `WASPADA`/`BAHAYA`), dan `rfid_logs` (saat RFID di-tap).
 
 ## 2. PCB 2 — Unit Monitor LCD (`pcb2_lcd_display/pcb2_lcd_display.ino`)
 - Subscribe MQTT `ikn/mut/node01` dan menampilkan `Q4:... Q135:...` serta `STATUS | DOOR` pada LCD I2C `16x2` (`0x27`).
