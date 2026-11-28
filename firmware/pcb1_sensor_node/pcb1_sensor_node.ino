@@ -49,6 +49,7 @@ unsigned long lastSupabaseSend     = 0;
 unsigned long lastMqttReconnectTry = 0;
 unsigned long lastRfidTapMs        = 0;
 unsigned long doorOpenTime         = 0;
+bool mqttHasAttemptedOnce          = false;
 bool isDoorOpen                    = false;
 bool lastRfidState                 = HIGH;
 
@@ -126,12 +127,17 @@ void setup_wifi() {
 
 void tryReconnectMqttNonBlocking(unsigned long now) {
   if (client.connected()) return;
-  if (now - lastMqttReconnectTry < MQTT_RECONNECT_WAIT_MS) return;
+  if (mqttHasAttemptedOnce && (now - lastMqttReconnectTry < MQTT_RECONNECT_WAIT_MS)) return;
+  mqttHasAttemptedOnce = true;
   lastMqttReconnectTry = now;
 
   String clientId = "ESP32-PCB1-" + String(random(0xffff), HEX);
   if (client.connect(clientId.c_str())) {
     Serial.println("MQTT Terhubung!");
+    // Kirim data pertama seketika begitu MQTT terhubung tanpa menunggu 2 detik
+    bacaDanEvaluasiSensor();
+    kirimMQTT(false);
+    lastSend = now;
   }
 }
 
@@ -261,6 +267,7 @@ void setup() {
 
   setup_wifi();
   client.setServer(mqtt_server, mqtt_port);
+  client.setBufferSize(512);
 
   // Buat queue & background worker task di Core 0 agar HTTPS Supabase tidak memblokir MQTT
   supabaseQueue = xQueueCreate(12, sizeof(SupabaseJob));
