@@ -8,6 +8,7 @@ import {
 import { NodeHealthStatus, SensorNodeState } from '../types/sensor';
 import { DoorBadge } from './DoorBadge';
 import { STATUS_STYLES } from './ThresholdGaugeBar';
+import { escapeHtml } from '../utils/validation';
 
 interface IknMapPanelProps {
   nodes: SensorNodeState[];
@@ -40,12 +41,18 @@ function buildTooltipHtml(node: SensorNodeState): string {
       ? `OFFLINE (${formatOfflineDuration(node.secondsSinceUpdate)})`
       : node.overallStatus.toUpperCase();
 
+  const safeCode = escapeHtml(node.config.code);
+  const safeDepth = escapeHtml(node.config.depth);
+  const safeStatus = escapeHtml(statusLabel);
+  const safeMq4 = escapeHtml(formatSensorValue(node.latest.mq4, 0));
+  const safeMq135 = escapeHtml(formatSensorValue(node.latest.mq135, 0));
+
   return `
     <div style="font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; line-height: 1.4;">
-      <div style="font-weight: 700; color: #1E293B;">${node.config.code} • ${node.config.depth}</div>
-      <div style="color: #64748B; font-size: 10px; margin-bottom: 3px;">${statusLabel}</div>
-      <div>MQ-4: <strong>${formatSensorValue(node.latest.mq4, 0)} ppm</strong></div>
-      <div>MQ-135: <strong>${formatSensorValue(node.latest.mq135, 0)} ppm</strong></div>
+      <div style="font-weight: 700; color: #1E293B;">${safeCode} • ${safeDepth}</div>
+      <div style="color: #64748B; font-size: 10px; margin-bottom: 3px;">${safeStatus}</div>
+      <div>MQ-4: <strong>${safeMq4} ppm</strong></div>
+      <div>MQ-135: <strong>${safeMq135} ppm</strong></div>
       <div>Pintu: <strong>${doorLabel}</strong></div>
     </div>
   `;

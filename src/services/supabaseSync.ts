@@ -1,11 +1,11 @@
 import {
-  DEFAULT_THRESHOLDS,
   MAX_HISTORY_POINTS,
   SENSOR_METADATA,
   SENSOR_NODES,
-  SENSOR_ORDER,
+  formatCoordinates,
+  formatNodeLocationTag,
 } from '../constants/sensors';
-import { supabase } from '../supabaseClient';
+import { isSupabaseConfigured, supabase } from '../supabaseClient';
 import {
   AlertLogEntry,
   DoorStatus,
@@ -16,6 +16,11 @@ import {
   TelemetryPoint,
   ThresholdMap,
 } from '../types/sensor';
+import {
+  sanitizeText,
+  toClampedFiniteNumber,
+  validateThresholdRecord,
+} from '../utils/validation';
 
 export type SupabaseSyncStatus =
   | 'checking'
@@ -49,15 +54,17 @@ function mapSupabaseError(error: { code?: string; message?: string }): SupabaseS
       message: 'Tabel ditemukan, akses anon dibatasi RLS/GRANT (42501)',
     };
   }
-  const detail = error.code ? `[${error.code}] ${error.message ?? ''}` : error.message;
+  const detail = error.code
+    ? `[${sanitizeText(error.code, 'ERR', 16)}] ${sanitizeText(error.message, '', 80)}`
+    : sanitizeText(error.message, 'Gagal terhubung ke Supabase', 80);
   return {
     status: 'error',
-    message: detail || 'Gagal terhubung ke Supabase',
+    message: detail,
   };
 }
 
 function inferSensorKeyFromName(rawName: unknown): SensorKey {
-  const s = String(rawName ?? '').toLowerCase();
+  const s = sanitizeText(rawName, 'mq4', 32).toLowerCase();
   if (s.includes('135')) return 'mq135';
   if (s.includes('suhu') || s.includes('temp')) return 'temperature';
   if (s.includes('kelemb') || s.includes('humid')) return 'humidity';
@@ -82,40 +89,174 @@ function parseEpochMs(raw: unknown): number {
   return Number.isNaN(d.getTime()) ? 0 : d.getTime();
 }
 
-function parseThresholdsRecord(raw: unknown): ThresholdMap | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const obj = raw as Record<string, unknown>;
-  const parsed = { ...DEFAULT_THRESHOLDS };
-
-  for (const key of SENSOR_ORDER) {
-    const entry = obj[key];
-    if (!entry || typeof entry !== 'object') return null;
-    const w = Number((entry as Record<string, unknown>).warning);
-    const d = Number((entry as Record<string, unknown>).danger);
-    if (!Number.isFinite(w) || !Number.isFinite(d) || w >= d) return null;
-    parsed[key] = { warning: w, danger: d };
-  }
-  return parsed;
+export interface MappedSensorRow {
+  node: SensorNodeConfig;
+  point: TelemetryPoint;
+  door: DoorStatus;
 }
 
+export function mapSensorLogRow(
+  row: Record<string, unknown>
+): MappedSensorRow | null {
+  const nodeCode = sanitizeText(row.node_id, '', 16).toUpperCase();
+  const node = NODE_BY_CODE.get(nodeCode);
+  if (!node) return null;
+
+  const mq4 = toClampedFiniteNumber(
+    row.mq4,
+    SENSOR_METADATA.mq4.min,
+    SENSOR_METADATA.mq4.max
+  );
+  const mq135 = toClampedFiniteNumber(
+    row.mq135,
+    SENSOR_METADATA.mq135.min,
+    SENSOR_METADATA.mq135.max
+  );
+  const temperature = toClampedFiniteNumber(
+    row.suhu,
+    SENSOR_METADATA.temperature.min,
+    SENSOR_METADATA.temperature.max
+  );
+  const humidity = toClampedFiniteNumber(
+    row.kelembapan,
+    SENSOR_METADATA.humidity.min,
+    SENSOR_METADATA.humidity.max
+  );
+
+  if (
+    mq4 === null ||
+    mq135 === null ||
+    temperature === null ||
+    humidity === null
+  ) {
+    return null;
+  }
+
+  const epochMs = parseEpochMs(row.created_at);
+  const doorRaw = sanitizeText(row.door, 'LOCKED', 10).toUpperCase();
+  const door: DoorStatus = doorRaw === 'OPEN' ? 'OPEN' : 'LOCKED';
+  const jarak = toClampedFiniteNumber(row.jarak, 0, 500);
+  const deviceStatus = sanitizeText(row.status, '', 16) || undefined;
+
+  return {
+    node,
+    door,
+    point: {
+      mq4,
+      mq135,
+      temperature,
+      humidity,
+      timestamp: formatDbTimestamp(row.created_at),
+      epochMs,
+      jarak: jarak ?? undefined,
+      door,
+      deviceStatus,
+    },
+  };
+}
+
+export function mapAlertLogRow(
+  row: Record<string, unknown>,
+  fallbackIdx = 0
+): AlertLogEntry | null {
+  const nodeCode = sanitizeText(row.node_id, 'NODE-01', 16).toUpperCase();
+  const node = NODE_BY_CODE.get(nodeCode);
+  if (!node) return null;
+
+  const sensorKey = inferSensorKeyFromName(row.sensor_name);
+  const meta = SENSOR_METADATA[sensorKey];
+  const value = toClampedFiniteNumber(row.value, meta.min, meta.max);
+  const thresholdValue = toClampedFiniteNumber(row.threshold, meta.min, meta.max);
+  if (value === null || thresholdValue === null) return null;
+
+  const levelRaw = sanitizeText(row.level, 'WASPADA', 16).toUpperCase();
+  const status: Exclude<SensorStatus, 'normal'> =
+    levelRaw === 'BAHAYA' || levelRaw === 'DANGER' ? 'danger' : 'warning';
+
+  return {
+    id: sanitizeText(row.id, `sb-alert-${fallbackIdx}`, 64),
+    timestamp: formatDbTimestamp(row.created_at),
+    nodeId: node.id,
+    nodeCode: node.code,
+    nodeName: node.name,
+    nodeLocationTag: formatNodeLocationTag(node),
+    coordinatesText: formatCoordinates(node),
+    sensorKey,
+    sensorName: sanitizeText(row.sensor_name, meta.label, 32),
+    value,
+    unit: meta.unit,
+    thresholdValue,
+    status,
+  };
+}
+
+export function mapRfidLogRow(
+  row: Record<string, unknown>,
+  fallbackIdx = 0
+): RfidAccessLogEntry | null {
+  const nodeCode = sanitizeText(row.node_id, 'NODE-01', 16).toUpperCase();
+  const node = NODE_BY_CODE.get(nodeCode);
+  if (!node) return null;
+
+  const doorRaw = sanitizeText(row.door_status, 'LOCKED', 10).toUpperCase();
+  const door: DoorStatus = doorRaw === 'OPEN' ? 'OPEN' : 'LOCKED';
+  const resultRaw = sanitizeText(
+    row.access_result,
+    door === 'OPEN' ? 'DITERIMA' : 'DITOLAK',
+    16
+  ).toUpperCase();
+
+  return {
+    id: sanitizeText(row.id, `sb-rfid-${fallbackIdx}`, 64),
+    timestamp: formatDbTimestamp(row.created_at),
+    nodeId: node.id,
+    nodeCode: node.code,
+    nodeName: node.name,
+    nodeLocationTag: formatNodeLocationTag(node),
+    coordinatesText: formatCoordinates(node),
+    door,
+    accessResult: resultRaw === 'DITERIMA' ? 'DITERIMA' : 'DITOLAK',
+    mq4Value: 0,
+  };
+}
+
+/**
+ * Pure read-only initial loader from Supabase.
+ * Web frontend NEVER writes telemetry, alerts, or RFID logs to Supabase.
+ */
 export async function checkAndLoadSupabaseInitialData(): Promise<InitialSupabaseData> {
+  if (!isSupabaseConfigured || !supabase) {
+    return {
+      syncState: {
+        status: 'error',
+        message: 'Konfigurasi .env Supabase (VITE_SUPABASE_URL / ANON_KEY) belum disetel',
+      },
+      historiesByNode: {},
+      lastUpdatedByNode: {},
+      doorsByNode: {},
+      alerts: [],
+      accessLogs: [],
+      thresholds: null,
+    };
+  }
+
   try {
     const [sensorRes, alertsRes, rfidRes, settingsRes] = await Promise.all([
       supabase
         .from('sensor_logs')
         .select('id, created_at, node_id, mq4, mq135, suhu, kelembapan, jarak, door, status')
         .order('created_at', { ascending: false })
-        .limit(80),
+        .limit(50),
       supabase
         .from('alert_logs')
         .select('id, created_at, node_id, sensor_name, value, threshold, level')
         .order('created_at', { ascending: false })
-        .limit(40),
+        .limit(20),
       supabase
         .from('rfid_logs')
         .select('id, created_at, node_id, door_status, access_result')
         .order('created_at', { ascending: false })
-        .limit(40),
+        .limit(20),
       supabase
         .from('settings')
         .select('id, thresholds, updated_at')
@@ -137,104 +278,44 @@ export async function checkAndLoadSupabaseInitialData(): Promise<InitialSupabase
       };
     }
 
-    // Group recent sensor_logs per node chronologically (oldest -> newest)
     const historiesByNode: Record<string, TelemetryPoint[]> = {};
     const lastUpdatedByNode: Record<string, number | null> = {};
     const doorsByNode: Record<string, DoorStatus> = {};
 
+    // Reverse descending rows to chronological order (oldest -> newest) for charts
     const sensorRowsDesc = (sensorRes.data ?? []) as Array<Record<string, unknown>>;
     for (let i = sensorRowsDesc.length - 1; i >= 0; i--) {
-      const row = sensorRowsDesc[i];
-      const nodeCode = String(row.node_id ?? '').toUpperCase();
-      const node = NODE_BY_CODE.get(nodeCode);
-      if (!node) continue;
+      const mapped = mapSensorLogRow(sensorRowsDesc[i]);
+      if (!mapped) continue;
 
-      const epochMs = parseEpochMs(row.created_at);
-      const doorRaw = String(row.door ?? 'LOCKED').toUpperCase();
-      const door: DoorStatus = doorRaw === 'OPEN' ? 'OPEN' : 'LOCKED';
-
-      const pt: TelemetryPoint = {
-        mq4: Number(row.mq4 ?? 0),
-        mq135: Number(row.mq135 ?? 0),
-        temperature: Number(row.suhu ?? 0),
-        humidity: Number(row.kelembapan ?? 0),
-        timestamp: formatDbTimestamp(row.created_at),
-        epochMs,
-        jarak: typeof row.jarak === 'number' ? row.jarak : undefined,
-        door,
-        deviceStatus: typeof row.status === 'string' ? row.status : undefined,
-      };
-
-      const prevList = historiesByNode[node.id] ?? [];
-      historiesByNode[node.id] = [...prevList.slice(-(MAX_HISTORY_POINTS - 1)), pt];
-      if (epochMs > 0) {
-        lastUpdatedByNode[node.id] = epochMs;
+      const prevList = historiesByNode[mapped.node.id] ?? [];
+      historiesByNode[mapped.node.id] = [
+        ...prevList.slice(-(MAX_HISTORY_POINTS - 1)),
+        mapped.point,
+      ];
+      if (mapped.point.epochMs > 0) {
+        lastUpdatedByNode[mapped.node.id] = mapped.point.epochMs;
       }
-      doorsByNode[node.id] = door;
+      doorsByNode[mapped.node.id] = mapped.door;
     }
 
-    const alerts: AlertLogEntry[] = (alertsRes.data ?? []).map(
-      (row: Record<string, unknown>, idx: number): AlertLogEntry => {
-        const nodeCode = String(row.node_id ?? 'NODE-01').toUpperCase();
-        const node = NODE_BY_CODE.get(nodeCode) ?? SENSOR_NODES[0];
-        const sensorKey = inferSensorKeyFromName(row.sensor_name);
-        const meta = SENSOR_METADATA[sensorKey];
-        const levelRaw = String(row.level ?? 'WASPADA').toUpperCase();
-        const status: Exclude<SensorStatus, 'normal'> =
-          levelRaw === 'BAHAYA' || levelRaw === 'DANGER' ? 'danger' : 'warning';
+    const alerts = ((alertsRes.data ?? []) as Array<Record<string, unknown>>)
+      .map((row, idx) => mapAlertLogRow(row, idx))
+      .filter((entry): entry is AlertLogEntry => entry !== null);
 
-        return {
-          id: String(row.id ?? `sb-alert-${idx}`),
-          timestamp: formatDbTimestamp(row.created_at),
-          nodeId: node.id,
-          nodeCode: node.code,
-          nodeName: node.name,
-          nodeLocationTag: `${node.code} • ${node.coordinates.lat.toFixed(4)}, ${node.coordinates.lng.toFixed(4)} • ${node.depth}`,
-          coordinatesText: `${node.coordinates.lat.toFixed(4)}, ${node.coordinates.lng.toFixed(4)}`,
-          sensorKey,
-          sensorName: String(row.sensor_name ?? meta.label),
-          value: Number(row.value ?? 0),
-          unit: meta.unit,
-          thresholdValue: Number(row.threshold ?? 0),
-          status,
-        };
-      }
-    );
-
-    const accessLogs: RfidAccessLogEntry[] = (rfidRes.data ?? []).map(
-      (row: Record<string, unknown>, idx: number) => {
-        const nodeCode = String(row.node_id ?? 'NODE-01').toUpperCase();
-        const node = NODE_BY_CODE.get(nodeCode) ?? SENSOR_NODES[0];
-        const doorRaw = String(row.door_status ?? 'LOCKED').toUpperCase();
-        const door: DoorStatus = doorRaw === 'OPEN' ? 'OPEN' : 'LOCKED';
-        const resultRaw = String(
-          row.access_result ?? (door === 'OPEN' ? 'DITERIMA' : 'DITOLAK')
-        ).toUpperCase();
-
-        return {
-          id: String(row.id ?? `sb-rfid-${idx}`),
-          timestamp: formatDbTimestamp(row.created_at),
-          nodeId: node.id,
-          nodeCode: node.code,
-          nodeName: node.name,
-          nodeLocationTag: `${node.code} • ${node.coordinates.lat.toFixed(4)}, ${node.coordinates.lng.toFixed(4)} • ${node.depth}`,
-          coordinatesText: `${node.coordinates.lat.toFixed(4)}, ${node.coordinates.lng.toFixed(4)}`,
-          door,
-          accessResult: resultRaw === 'DITERIMA' ? 'DITERIMA' : 'DITOLAK',
-          mq4Value: 0,
-        };
-      }
-    );
+    const accessLogs = ((rfidRes.data ?? []) as Array<Record<string, unknown>>)
+      .map((row, idx) => mapRfidLogRow(row, idx))
+      .filter((entry): entry is RfidAccessLogEntry => entry !== null);
 
     const savedRow = settingsRes.data?.[0] as Record<string, unknown> | undefined;
     const savedThresholds = savedRow
-      ? parseThresholdsRecord(savedRow.thresholds)
+      ? validateThresholdRecord(savedRow.thresholds)
       : null;
 
     return {
       syncState: {
         status: 'connected',
-        message: 'Terhubung (Mode baca riwayat & simpan pengaturan; penulisan log oleh ESP32)',
+        message: 'Terhubung Read-Only + Realtime (ESP32 menulis langsung ke Supabase)',
       },
       historiesByNode,
       lastUpdatedByNode,
@@ -247,7 +328,10 @@ export async function checkAndLoadSupabaseInitialData(): Promise<InitialSupabase
     return {
       syncState: {
         status: 'error',
-        message: err instanceof Error ? err.message : 'Koneksi Supabase gagal',
+        message:
+          err instanceof Error
+            ? sanitizeText(err.message, 'Koneksi Supabase gagal', 80)
+            : 'Koneksi Supabase gagal',
       },
       historiesByNode: {},
       lastUpdatedByNode: {},
@@ -256,24 +340,5 @@ export async function checkAndLoadSupabaseInitialData(): Promise<InitialSupabase
       accessLogs: [],
       thresholds: null,
     };
-  }
-}
-
-export async function saveThresholdsToSupabase(
-  thresholds: ThresholdMap
-): Promise<SupabaseSyncState | null> {
-  try {
-    const { error } = await supabase.from('settings').upsert({
-      id: 'default_thresholds',
-      thresholds,
-      updated_at: new Date().toISOString(),
-    });
-    if (error) return mapSupabaseError(error);
-    return {
-      status: 'connected',
-      message: 'Ambang batas tersimpan di Supabase',
-    };
-  } catch {
-    return null;
   }
 }

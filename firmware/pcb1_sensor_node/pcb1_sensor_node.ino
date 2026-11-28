@@ -16,6 +16,7 @@ const char* node_id = "NODE-01";
 // --- Konfigurasi Supabase REST API (Aktif 24/7 via Background Task) ---
 const char* supabase_url = "https://yhtvyongrbpmscvslgks.supabase.co";
 const char* supabase_key = "sb_publishable_Ys8kCYOZyB5u5ze7yArtew_PKscjpK8";
+const char* device_token = "GANTI_TOKEN_PERANGKAT_IKN_2026"; // Harus sama dengan policy RLS di supabase/rls_hardening.sql
 
 // --- Pemetaan Pin ---
 #define PIN_MQ4     34
@@ -84,6 +85,7 @@ bool postToSupabase(const char* table, const char* jsonBody) {
   http.setTimeout(3000);
   http.addHeader("Content-Type", "application/json");
   http.addHeader("apikey", supabase_key);
+  http.addHeader("x-device-token", device_token);
   http.addHeader("Prefer", "return=minimal");
 
   int httpCode = http.POST(jsonBody);

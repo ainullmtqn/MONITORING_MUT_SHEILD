@@ -1,6 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SensorStatus } from '../types/sensor';
 
+const AUDIO_STORAGE_KEY = 'mut_ikn_audio_enabled_v1';
+
+function readInitialAudioPreference(): boolean {
+  if (typeof window === 'undefined') return true;
+  try {
+    const raw = window.localStorage.getItem(AUDIO_STORAGE_KEY);
+    if (raw === 'false') return false;
+    if (raw === 'true') return true;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 interface UseAlertAudioReturn {
   isAudioEnabled: boolean;
   toggleAudio: () => void;
@@ -9,10 +23,13 @@ interface UseAlertAudioReturn {
 
 /**
  * Custom hook that synthesizes clean laboratory-instrument alert tones
- * using the Web Audio API without external audio files.
+ * using the Web Audio API without external audio files, persisting preference
+ * in localStorage.
  */
 export function useAlertAudio(): UseAlertAudioReturn {
-  const [isAudioEnabled, setIsAudioEnabled] = useState<boolean>(true);
+  const [isAudioEnabled, setIsAudioEnabled] = useState<boolean>(
+    readInitialAudioPreference
+  );
   const audioCtxRef = useRef<AudioContext | null>(null);
   const lastToneTimeRef = useRef<number>(0);
 
@@ -34,7 +51,6 @@ export function useAlertAudio(): UseAlertAudioReturn {
     return audioCtxRef.current;
   }, []);
 
-  // Unlock AudioContext on first user interaction anywhere in the page
   useEffect(() => {
     const handleFirstInteraction = () => {
       if (isAudioEnabled) {
@@ -83,10 +99,14 @@ export function useAlertAudio(): UseAlertAudioReturn {
   const toggleAudio = useCallback(() => {
     setIsAudioEnabled((prev) => {
       const next = !prev;
+      try {
+        window.localStorage.setItem(AUDIO_STORAGE_KEY, String(next));
+      } catch {
+        // Ignore storage errors in restricted modes
+      }
       if (next) {
         const ctx = ensureAudioContext();
         if (ctx) {
-          // Short confirmation tone when enabling alarm audio
           setTimeout(() => playBeep(660, 0, 0.08, 0.06), 30);
         }
       }
@@ -104,11 +124,9 @@ export function useAlertAudio(): UseAlertAudioReturn {
       lastToneTimeRef.current = nowMs;
 
       if (status === 'danger') {
-        // Two crisp high-priority lab instrument pulses
         playBeep(1174.66, 0, 0.14, 0.12);
         playBeep(1174.66, 0.2, 0.14, 0.12);
       } else if (status === 'warning') {
-        // Single moderate caution tone
         playBeep(880, 0, 0.14, 0.08);
       }
     },
